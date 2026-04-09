@@ -1,0 +1,69 @@
+package com.example.clickassist.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
+import com.example.clickassist.data.local.entity.ActionStepEntity
+import com.example.clickassist.data.local.entity.TaskEntity
+import com.example.clickassist.data.local.entity.TaskWithSteps
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+abstract class TaskDao {
+    @Transaction
+    @Query("SELECT * FROM tasks ORDER BY updatedAt DESC")
+    abstract fun observeTasks(): Flow<List<TaskWithSteps>>
+
+    @Transaction
+    @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
+    abstract fun observeTask(taskId: Long): Flow<TaskWithSteps?>
+
+    @Transaction
+    @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
+    abstract suspend fun getTask(taskId: Long): TaskWithSteps?
+
+    @Insert
+    protected abstract suspend fun insertTask(task: TaskEntity): Long
+
+    @Update
+    protected abstract suspend fun updateTask(task: TaskEntity)
+
+    @Insert
+    protected abstract suspend fun insertActionSteps(steps: List<ActionStepEntity>)
+
+    @Query("DELETE FROM action_steps WHERE taskId = :taskId")
+    protected abstract suspend fun deleteStepsForTask(taskId: Long)
+
+    @Query("DELETE FROM tasks WHERE id = :taskId")
+    abstract suspend fun deleteTaskById(taskId: Long)
+
+    @Transaction
+    open suspend fun upsertTaskWithSteps(
+        task: TaskEntity,
+        steps: List<ActionStepEntity>,
+    ): Long {
+        val taskId = if (task.id == 0L) {
+            insertTask(task)
+        } else {
+            updateTask(task)
+            task.id
+        }
+
+        deleteStepsForTask(taskId)
+
+        if (steps.isNotEmpty()) {
+            insertActionSteps(
+                steps.map { step ->
+                    step.copy(
+                        id = 0L,
+                        taskId = taskId,
+                    )
+                },
+            )
+        }
+
+        return taskId
+    }
+}

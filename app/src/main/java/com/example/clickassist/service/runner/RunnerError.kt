@@ -1,0 +1,38 @@
+package com.example.clickassist.service.runner
+
+sealed interface RunnerError {
+    data object OverlayPermissionDenied : RunnerError
+
+    data object AccessibilityDisabled : RunnerError
+
+    data object TapPointNotSet : RunnerError
+
+    data class TapPointOutOfBounds(
+        val x: Int?,
+        val y: Int?,
+        val screenWidth: Int,
+        val screenHeight: Int,
+    ) : RunnerError
+
+    data object NoExecutableSteps : RunnerError
+
+    data class InvalidRepeatCount(
+        val stepIndex: Int,
+    ) : RunnerError
+
+    data class InvalidIntervalMs(
+        val stepIndex: Int,
+    ) : RunnerError
+
+    data object InvalidTotalRounds : RunnerError
+
+    data object GestureDispatchFailed : RunnerError
+
+    data class TaskNotFound(
+        val taskId: Long,
+    ) : RunnerError
+
+    data class Unknown(
+        val rawMessage: String? = null,
+    ) : RunnerError
+}

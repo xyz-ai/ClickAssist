@@ -1,11 +1,14 @@
 package com.example.clickassist.viewmodel
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.clickassist.R
 import com.example.clickassist.app.AppContainer
 import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskEntity
+import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,15 +31,33 @@ data class TaskEditUiState(
     val repeatCount: String = "1",
     val preDelayMs: String = "0",
     val postDelayMs: String = "0",
+    val isCoordinatePickerVisible: Boolean = false,
+    val isAdvancedSettingsExpanded: Boolean = false,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
-    val validationMessage: String? = null,
-)
+    @StringRes
+    val validationMessageRes: Int? = null,
+) {
+    val tapPosition: ScreenPoint?
+        get() {
+            val tapX = x.toIntOrNull()
+            val tapY = y.toIntOrNull()
+            return if (tapX != null && tapY != null) {
+                ScreenPoint(x = tapX, y = tapY)
+            } else {
+                null
+            }
+        }
+
+    val isTapPositionSet: Boolean
+        get() = tapPosition != null
+}
 
 class TaskEditViewModel(
     private val taskId: Long,
     private val taskRepository: TaskRepository,
     private val settingsRepository: SettingsRepository,
+    private val defaultTaskName: String,
 ) : ViewModel() {
     private val internalState = MutableStateFlow(
         TaskEditUiState(isLoading = taskId != 0L),
@@ -52,35 +73,62 @@ class TaskEditViewModel(
         }
     }
 
-    fun updateName(value: String) = updateState { copy(name = value, validationMessage = null) }
+    fun updateName(value: String) = updateState { copy(name = value, validationMessageRes = null) }
 
     fun updateEnabled(value: Boolean) = updateState { copy(enabled = value) }
 
-    fun updateTotalRounds(value: String) = updateState { copy(totalRounds = value, validationMessage = null) }
+    fun updateTotalRounds(value: String) = updateState { copy(totalRounds = value, validationMessageRes = null) }
 
     fun updateInfiniteRounds(value: Boolean) = updateState { copy(infiniteRounds = value) }
 
-    fun updateX(value: String) = updateState { copy(x = value, validationMessage = null) }
+    fun updateX(value: String) = updateState { copy(x = value, validationMessageRes = null) }
 
-    fun updateY(value: String) = updateState { copy(y = value, validationMessage = null) }
+    fun updateY(value: String) = updateState { copy(y = value, validationMessageRes = null) }
 
-    fun updateIntervalMs(value: String) = updateState { copy(intervalMs = value, validationMessage = null) }
+    fun updateIntervalMs(value: String) = updateState { copy(intervalMs = value, validationMessageRes = null) }
 
-    fun updateRepeatCount(value: String) = updateState { copy(repeatCount = value, validationMessage = null) }
+    fun updateRepeatCount(value: String) = updateState { copy(repeatCount = value, validationMessageRes = null) }
 
-    fun updatePreDelayMs(value: String) = updateState { copy(preDelayMs = value, validationMessage = null) }
+    fun updatePreDelayMs(value: String) = updateState { copy(preDelayMs = value, validationMessageRes = null) }
 
-    fun updatePostDelayMs(value: String) = updateState { copy(postDelayMs = value, validationMessage = null) }
+    fun updatePostDelayMs(value: String) = updateState { copy(postDelayMs = value, validationMessageRes = null) }
+
+    fun openCoordinatePicker() = updateState {
+        copy(
+            isCoordinatePickerVisible = true,
+            validationMessageRes = null,
+        )
+    }
+
+    fun dismissCoordinatePicker() = updateState {
+        copy(isCoordinatePickerVisible = false)
+    }
+
+    fun applyCoordinateSelection(point: ScreenPoint) = updateState {
+        copy(
+            x = point.x.toString(),
+            y = point.y.toString(),
+            isCoordinatePickerVisible = false,
+            validationMessageRes = null,
+        )
+    }
+
+    fun toggleAdvancedSettings() = updateState {
+        copy(isAdvancedSettingsExpanded = !isAdvancedSettingsExpanded)
+    }
 
     fun saveTask() {
         val snapshot = internalState.value
         if (snapshot.isSaving) return
 
-        val tapX = snapshot.x.toIntOrNull()
-        val tapY = snapshot.y.toIntOrNull()
+        val xValue = snapshot.x.trim()
+        val yValue = snapshot.y.trim()
+        val tapX = xValue.toIntOrNull()
+        val tapY = yValue.toIntOrNull()
+        val hasManualTapInput = xValue.isNotEmpty() || yValue.isNotEmpty()
 
-        if (tapX == null || tapY == null) {
-            updateState { copy(validationMessage = "TAP coordinates must be integers") }
+        if (hasManualTapInput && (tapX == null || tapY == null)) {
+            updateState { copy(validationMessageRes = R.string.validation_manual_coordinate_invalid) }
             return
         }
 
@@ -91,13 +139,13 @@ class TaskEditViewModel(
         val postDelayMs = snapshot.postDelayMs.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         val now = System.currentTimeMillis()
 
-        updateState { copy(isSaving = true, validationMessage = null) }
+        updateState { copy(isSaving = true, validationMessageRes = null) }
 
         viewModelScope.launch {
             try {
                 val task = TaskEntity(
                     id = snapshot.taskId,
-                    name = snapshot.name.trim().ifEmpty { "Untitled Task" },
+                    name = snapshot.name.trim().ifEmpty { defaultTaskName },
                     enabled = snapshot.enabled,
                     totalRounds = totalRounds,
                     infiniteRounds = snapshot.infiniteRounds,
@@ -127,15 +175,15 @@ class TaskEditViewModel(
                         taskId = savedTaskId,
                         createdAt = if (createdAt == 0L) now else createdAt,
                         isSaving = false,
-                        validationMessage = null,
+                        validationMessageRes = null,
                     )
                 }
                 _savedTaskIds.tryEmit(savedTaskId)
-            } catch (throwable: Throwable) {
+            } catch (_: Throwable) {
                 updateState {
                     copy(
                         isSaving = false,
-                        validationMessage = throwable.message ?: "Failed to save task",
+                        validationMessageRes = R.string.validation_save_task_failed,
                     )
                 }
             }
@@ -151,7 +199,7 @@ class TaskEditViewModel(
                 updateState {
                     copy(
                         isLoading = false,
-                        validationMessage = "Task not found or step data is empty",
+                        validationMessageRes = R.string.validation_task_not_found,
                     )
                 }
                 return@launch
@@ -191,6 +239,7 @@ class TaskEditViewModel(
                         taskId = taskId,
                         taskRepository = appContainer.taskRepository,
                         settingsRepository = appContainer.settingsRepository,
+                        defaultTaskName = appContainer.appContext.getString(R.string.default_task_name),
                     ) as T
                 }
             }

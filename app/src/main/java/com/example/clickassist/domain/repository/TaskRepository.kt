@@ -17,5 +17,12 @@ interface TaskRepository {
         steps: List<ActionStepEntity>,
     ): Long
 
+    suspend fun updateTapStepPosition(
+        taskId: Long,
+        stepId: Long,
+        x: Int,
+        y: Int,
+    )
+
     suspend fun deleteTask(taskId: Long)
 }

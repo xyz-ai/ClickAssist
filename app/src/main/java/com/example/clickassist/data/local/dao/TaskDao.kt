@@ -33,6 +33,20 @@ abstract class TaskDao {
     @Insert
     protected abstract suspend fun insertActionSteps(steps: List<ActionStepEntity>)
 
+    @Query("UPDATE action_steps SET x = :x, y = :y WHERE id = :stepId AND taskId = :taskId")
+    protected abstract suspend fun updateTapStepPositionInternal(
+        taskId: Long,
+        stepId: Long,
+        x: Int,
+        y: Int,
+    )
+
+    @Query("UPDATE tasks SET updatedAt = :updatedAt WHERE id = :taskId")
+    protected abstract suspend fun updateTaskUpdatedAt(
+        taskId: Long,
+        updatedAt: Long,
+    )
+
     @Query("DELETE FROM action_steps WHERE taskId = :taskId")
     protected abstract suspend fun deleteStepsForTask(taskId: Long)
 
@@ -65,5 +79,24 @@ abstract class TaskDao {
         }
 
         return taskId
+    }
+
+    @Transaction
+    open suspend fun updateTapStepPosition(
+        taskId: Long,
+        stepId: Long,
+        x: Int,
+        y: Int,
+    ) {
+        updateTapStepPositionInternal(
+            taskId = taskId,
+            stepId = stepId,
+            x = x,
+            y = y,
+        )
+        updateTaskUpdatedAt(
+            taskId = taskId,
+            updatedAt = System.currentTimeMillis(),
+        )
     }
 }

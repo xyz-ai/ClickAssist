@@ -22,9 +22,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.clickassist.R
 import com.example.clickassist.data.local.entity.TaskWithSteps
+import com.example.clickassist.service.runner.RunnerProgress
 import com.example.clickassist.service.runner.RunnerState
 import com.example.clickassist.viewmodel.TaskListViewModel
 
@@ -41,10 +44,10 @@ fun TaskListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "Task List") },
+                title = { Text(text = stringResource(R.string.task_list_title)) },
                 actions = {
                     TextButton(onClick = onOpenPermissions) {
-                        Text(text = "Permissions")
+                        Text(text = stringResource(R.string.task_list_action_permissions))
                     }
                 },
             )
@@ -67,17 +70,9 @@ fun TaskListScreen(
             item {
                 RunnerCard(
                     runnerState = uiState.runnerState,
-                    runnerDescription = buildString {
-                        append("Current state: ${uiState.runnerState}")
-                        uiState.runnerProgress?.let { progress ->
-                            append(" | task#${progress.taskId}")
-                            append(" | round ${progress.currentRoundIndex + 1}")
-                            append(" | step ${progress.currentStepIndex + 1}")
-                            append(" | repeat ${progress.currentStepRepeatIndex + 1}")
-                        }
-                    },
+                    runnerProgress = uiState.runnerProgress,
                     lastEditedTaskId = uiState.lastEditedTaskId,
-                    runnerErrorMessage = uiState.runnerErrorMessage,
+                    runnerErrorMessageRes = uiState.runnerErrorMessageRes,
                     onPause = viewModel::pauseTask,
                     onResume = viewModel::resumeTask,
                     onStop = viewModel::stopTask,
@@ -92,12 +87,12 @@ fun TaskListScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = "No tasks yet",
+                                text = stringResource(R.string.task_list_empty_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = "Create a local task with one TAP step and start it from here.",
+                                text = stringResource(R.string.task_list_empty_description),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -123,9 +118,9 @@ fun TaskListScreen(
 @Composable
 private fun RunnerCard(
     runnerState: RunnerState,
-    runnerDescription: String,
+    runnerProgress: RunnerProgress?,
     lastEditedTaskId: Long?,
-    runnerErrorMessage: String?,
+    runnerErrorMessageRes: Int?,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
@@ -136,17 +131,28 @@ private fun RunnerCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Runner Control",
+                text = stringResource(R.string.task_list_runner_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(text = runnerDescription)
-            if (lastEditedTaskId != null) {
-                Text(text = "Last edited task: #$lastEditedTaskId")
+            Text(
+                text = stringResource(
+                    R.string.task_list_runner_state,
+                    stringResource(runnerStateRes(runnerState)),
+                ),
+            )
+            runnerProgress?.let { progress ->
+                Text(text = stringResource(R.string.task_list_runner_task, progress.taskId))
+                Text(text = stringResource(R.string.task_list_runner_round, progress.currentRoundIndex + 1))
+                Text(text = stringResource(R.string.task_list_runner_step, progress.currentStepIndex + 1))
+                Text(text = stringResource(R.string.task_list_runner_repeat, progress.currentStepRepeatIndex + 1))
             }
-            if (!runnerErrorMessage.isNullOrBlank()) {
+            if (lastEditedTaskId != null) {
+                Text(text = stringResource(R.string.task_list_last_edited_task, lastEditedTaskId))
+            }
+            runnerErrorMessageRes?.let { messageRes ->
                 Text(
-                    text = runnerErrorMessage,
+                    text = stringResource(messageRes),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
@@ -158,19 +164,19 @@ private fun RunnerCard(
                     onClick = onPause,
                     enabled = runnerState == RunnerState.RUNNING,
                 ) {
-                    Text(text = "Pause")
+                    Text(text = stringResource(R.string.task_list_action_pause))
                 }
                 Button(
                     onClick = onResume,
                     enabled = runnerState == RunnerState.PAUSED,
                 ) {
-                    Text(text = "Resume")
+                    Text(text = stringResource(R.string.task_list_action_resume))
                 }
                 OutlinedButton(
                     onClick = onStop,
                     enabled = runnerState != RunnerState.IDLE,
                 ) {
-                    Text(text = "Stop")
+                    Text(text = stringResource(R.string.task_list_action_stop))
                 }
             }
         }
@@ -186,6 +192,9 @@ private fun TaskCard(
 ) {
     val task = taskWithSteps.task
     val firstStep = taskWithSteps.steps.firstOrNull()
+    val pointX = firstStep?.x
+    val pointY = firstStep?.y
+    val hasTapPoint = pointX != null && pointY != null
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -198,26 +207,56 @@ private fun TaskCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = buildString {
-                    append("Task #${task.id} | ")
-                    append(if (task.enabled) "Enabled" else "Disabled")
-                    append(" | ")
-                    append(
-                        if (task.infiniteRounds) {
-                            "Infinite rounds"
+                text = stringResource(
+                    R.string.task_list_task_meta,
+                    task.id,
+                    stringResource(
+                        if (task.enabled) {
+                            R.string.task_list_task_enabled
                         } else {
-                            "Rounds ${task.totalRounds}"
+                            R.string.task_list_task_disabled
                         },
-                    )
+                    ),
+                ),
+            )
+            Text(
+                text = stringResource(
+                    if (hasTapPoint) {
+                        R.string.task_list_position_set
+                    } else {
+                        R.string.task_list_position_not_set
+                    },
+                ),
+            )
+            Text(
+                text = if (task.infiniteRounds) {
+                    stringResource(R.string.task_list_rounds_infinite)
+                } else {
+                    stringResource(R.string.task_list_rounds_count, task.totalRounds)
                 },
             )
             Text(
-                text = if (firstStep == null) {
-                    "No steps"
-                } else {
-                    "Default TAP: x=${firstStep.x ?: "-"} y=${firstStep.y ?: "-"} interval=${firstStep.intervalMs} repeat=${firstStep.repeatCount}"
-                },
+                text = stringResource(
+                    R.string.task_list_repeat_count,
+                    firstStep?.repeatCount ?: 0,
+                ),
             )
+            Text(
+                text = stringResource(
+                    R.string.task_list_interval_ms,
+                    (firstStep?.intervalMs ?: 0L).toInt(),
+                ),
+            )
+            if (hasTapPoint) {
+                Text(
+                    text = stringResource(
+                        R.string.task_list_coordinate,
+                        pointX!!,
+                        pointY!!,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -226,15 +265,28 @@ private fun TaskCard(
                     onClick = onStart,
                     enabled = task.enabled,
                 ) {
-                    Text(text = "Start")
+                    Text(text = stringResource(R.string.task_list_action_start))
                 }
                 OutlinedButton(onClick = onEdit) {
-                    Text(text = "Edit")
+                    Text(text = stringResource(R.string.task_list_action_edit))
                 }
                 TextButton(onClick = onDelete) {
-                    Text(text = "Delete")
+                    Text(text = stringResource(R.string.task_list_action_delete))
                 }
             }
         }
+    }
+}
+
+private fun runnerStateRes(
+    runnerState: RunnerState,
+): Int {
+    return when (runnerState) {
+        RunnerState.IDLE -> R.string.runner_state_idle
+        RunnerState.RUNNING -> R.string.runner_state_running
+        RunnerState.PAUSED -> R.string.runner_state_paused
+        RunnerState.STOPPING -> R.string.runner_state_stopping
+        RunnerState.COMPLETED -> R.string.runner_state_completed
+        RunnerState.ERROR -> R.string.runner_state_error
     }
 }

@@ -3,6 +3,7 @@ package com.example.clickassist.ui.permission
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,10 +27,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.clickassist.R
 import com.example.clickassist.viewmodel.PermissionGuideViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,10 +61,10 @@ fun PermissionGuideScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "Permission Guide") },
+                title = { Text(text = stringResource(R.string.permission_guide_title)) },
                 actions = {
                     TextButton(onClick = onContinueToTaskList) {
-                        Text(text = "Tasks")
+                        Text(text = stringResource(R.string.permission_guide_action_tasks))
                     }
                 },
             )
@@ -76,10 +79,14 @@ fun PermissionGuideScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PermissionCard(
-                title = "Overlay Permission",
-                description = "Used for the basic floating panel. V1 only shows runner status and does not do dynamic recognition.",
-                statusText = if (uiState.hasOverlayPermission) "Granted" else "Missing",
-                actionText = "Open Settings",
+                titleRes = R.string.permission_overlay_title,
+                descriptionRes = R.string.permission_overlay_description,
+                statusTextRes = if (uiState.hasOverlayPermission) {
+                    R.string.common_status_granted
+                } else {
+                    R.string.common_status_missing
+                },
+                actionTextRes = R.string.common_open_settings,
                 onAction = {
                     viewModel.markOverlaySettingsOpened()
                     context.startActivity(
@@ -92,10 +99,14 @@ fun PermissionGuideScreen(
             )
 
             PermissionCard(
-                title = "Accessibility Permission",
-                description = "Used to dispatch static gestures. V1 only runs user-configured actions.",
-                statusText = if (uiState.hasAccessibilityPermission) "Granted" else "Missing",
-                actionText = "Open Settings",
+                titleRes = R.string.permission_accessibility_title,
+                descriptionRes = R.string.permission_accessibility_description,
+                statusTextRes = if (uiState.hasAccessibilityPermission) {
+                    R.string.common_status_granted
+                } else {
+                    R.string.common_status_missing
+                },
+                actionTextRes = R.string.common_open_settings,
                 onAction = {
                     viewModel.markAccessibilitySettingsOpened()
                     context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -108,25 +119,27 @@ fun PermissionGuideScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "Local Data",
+                        text = stringResource(R.string.permission_local_data_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Tasks, steps, and settings are stored only in local Room and DataStore. No network or cloud sync is used.",
+                        text = stringResource(R.string.permission_local_data_description),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        text = if (uiState.localOnlyNoticeAcknowledged) {
-                            "Status: local-only notice acknowledged"
-                        } else {
-                            "Status: local-only notice not acknowledged"
-                        },
+                        text = stringResource(
+                            if (uiState.localOnlyNoticeAcknowledged) {
+                                R.string.permission_local_data_acknowledged
+                            } else {
+                                R.string.permission_local_data_not_acknowledged
+                            },
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     TextButton(onClick = viewModel::acknowledgeLocalOnlyNotice) {
-                        Text(text = "Acknowledge")
+                        Text(text = stringResource(R.string.common_acknowledge))
                     }
                 }
             }
@@ -137,18 +150,20 @@ fun PermissionGuideScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "Summary",
+                        text = stringResource(R.string.permission_summary_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Text(text = "Overlay guide opens: ${uiState.overlayGuideOpenCount}")
-                    Text(text = "Accessibility guide opens: ${uiState.accessibilityGuideOpenCount}")
+                    Text(text = stringResource(R.string.permission_overlay_open_count, uiState.overlayGuideOpenCount))
+                    Text(text = stringResource(R.string.permission_accessibility_open_count, uiState.accessibilityGuideOpenCount))
                     Text(
-                        text = if (uiState.allRequiredPermissionsGranted) {
-                            "All required permissions for V1 are available."
-                        } else {
-                            "Some permissions are still missing. Tasks can be saved, but execution will fail."
-                        },
+                        text = stringResource(
+                            if (uiState.allRequiredPermissionsGranted) {
+                                R.string.permission_summary_ready
+                            } else {
+                                R.string.permission_summary_missing
+                            },
+                        ),
                     )
                 }
             }
@@ -157,7 +172,7 @@ fun PermissionGuideScreen(
                 onClick = onContinueToTaskList,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(text = "Open Task List")
+                Text(text = stringResource(R.string.permission_open_task_list))
             }
         }
     }
@@ -165,10 +180,10 @@ fun PermissionGuideScreen(
 
 @Composable
 private fun PermissionCard(
-    title: String,
-    description: String,
-    statusText: String,
-    actionText: String,
+    @StringRes titleRes: Int,
+    @StringRes descriptionRes: Int,
+    @StringRes statusTextRes: Int,
+    @StringRes actionTextRes: Int,
     onAction: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -177,12 +192,12 @@ private fun PermissionCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = title,
+                text = stringResource(titleRes),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = description,
+                text = stringResource(descriptionRes),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Row(
@@ -190,11 +205,14 @@ private fun PermissionCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "Status: $statusText",
+                    text = stringResource(
+                        R.string.permission_status_format,
+                        stringResource(statusTextRes),
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 TextButton(onClick = onAction) {
-                    Text(text = actionText)
+                    Text(text = stringResource(actionTextRes))
                 }
             }
         }

@@ -9,6 +9,7 @@ import com.example.clickassist.data.settings.DataStoreSettingsRepository
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.overlay.OverlayController
+import com.example.clickassist.service.runner.TaskStartValidator
 import com.example.clickassist.service.runner.TaskRunnerEngine
 
 class ClickAssistApplication : Application() {
@@ -52,10 +53,16 @@ class DefaultAppContainer(
         OverlayController(context = appContext)
     }
 
+    private val taskStartValidator: TaskStartValidator by lazy {
+        TaskStartValidator(context = appContext)
+    }
+
     override val taskRunnerEngine: TaskRunnerEngine by lazy {
         TaskRunnerEngine(
+            appContext = appContext,
             taskRepository = taskRepository,
             overlayController = overlayController,
+            taskStartValidator = taskStartValidator,
         )
     }
 }

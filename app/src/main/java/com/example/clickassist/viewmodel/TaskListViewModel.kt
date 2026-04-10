@@ -1,5 +1,6 @@
 package com.example.clickassist.viewmodel
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -7,6 +8,7 @@ import com.example.clickassist.app.AppContainer
 import com.example.clickassist.data.local.entity.TaskWithSteps
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
+import com.example.clickassist.service.runner.RunnerErrorMessageMapper
 import com.example.clickassist.service.runner.RunnerProgress
 import com.example.clickassist.service.runner.RunnerState
 import com.example.clickassist.service.runner.TaskRunnerEngine
@@ -20,7 +22,8 @@ data class TaskListUiState(
     val tasks: List<TaskWithSteps> = emptyList(),
     val runnerState: RunnerState = RunnerState.IDLE,
     val runnerProgress: RunnerProgress? = null,
-    val runnerErrorMessage: String? = null,
+    @StringRes
+    val runnerErrorMessageRes: Int? = null,
     val lastEditedTaskId: Long? = null,
 )
 
@@ -34,13 +37,13 @@ class TaskListViewModel(
         settingsRepository.settingsFlow,
         taskRunnerEngine.runnerState,
         taskRunnerEngine.runnerProgress,
-        taskRunnerEngine.errorMessage,
+        taskRunnerEngine.runnerError,
     ) { tasks, settings, runnerState, runnerProgress, runnerError ->
         TaskListUiState(
             tasks = tasks,
             runnerState = runnerState,
             runnerProgress = runnerProgress,
-            runnerErrorMessage = runnerError,
+            runnerErrorMessageRes = RunnerErrorMessageMapper.map(runnerError),
             lastEditedTaskId = settings.lastEditedTaskId,
         )
     }.stateIn(

@@ -7,18 +7,22 @@ import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.accessibility.MyAccessibilityService
 import com.example.clickassist.service.overlay.OverlayController
+import com.example.clickassist.service.overlay.OverlayToolbarCallbacks
+import com.example.clickassist.service.overlay.OverlayToolbarUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 
 class TaskRunnerEngine(
     appContext: Context,
@@ -38,129 +42,45 @@ class TaskRunnerEngine(
     private val _runnerError = MutableStateFlow<RunnerError?>(null)
     val runnerError: StateFlow<RunnerError?> = _runnerError.asStateFlow()
 
+    private val _overlaySessionState = MutableStateFlow(OverlaySessionState())
+    val overlaySessionState: StateFlow<OverlaySessionState> = _overlaySessionState.asStateFlow()
+
     private var runnerJob: Job? = null
     private var activeTapTaskId: Long? = null
     private var activeTapStepId: Long? = null
     private val activeTapPoint = AtomicReference<ScreenPoint?>(null)
 
-    fun start(taskId: Long) {
-        val currentState = _runnerState.value
-        if (currentState == RunnerState.RUNNING || currentState == RunnerState.PAUSED) return
+    init {
+        overlayController.bindToolbarCallbacks(
+            OverlayToolbarCallbacks(
+                onStartRequested = ::handleToolbarStartRequested,
+                onPauseRequested = ::pause,
+                onStopRequested = ::stop,
+                onTargetToggleRequested = ::toggleTargetVisibility,
+                onCloseRequested = ::exitFloatingMode,
+            ),
+        )
+    }
 
-        runnerJob?.cancel()
-        clearActiveTapSessionLocal()
-        publishProgress(null)
-        publishError(null)
-        publishState(RunnerState.IDLE)
+    fun enterFloatingMode(taskId: Long) {
+        engineScope.launch {
+            enterFloatingModeInternal(taskId)
+        }
+    }
 
-        runnerJob = engineScope.launch {
-            overlayController.hideTarget()
+    fun startActiveTask() {
+        when (_runnerState.value) {
+            RunnerState.PAUSED -> resume()
+            RunnerState.RUNNING,
+            RunnerState.STOPPING,
+            -> Unit
 
-            val taskWithSteps = taskRepository.getTask(taskId)
-            if (taskWithSteps == null) {
-                publishError(RunnerError.TaskNotFound(taskId))
-                runnerJob = null
-                return@launch
-            }
-
-            if (!overlayController.hasPermission()) {
-                publishError(RunnerError.OverlayPermissionDenied)
-                runnerJob = null
-                return@launch
-            }
-
-            val activeTapStep = taskWithSteps.steps
-                .filter { step ->
-                    step.enabled && step.actionType == ActionStepEntity.ACTION_TAP
-                }
-                .sortedBy { step -> step.orderIndex }
-                .firstOrNull()
-
-            if (activeTapStep == null) {
-                publishError(RunnerError.NoExecutableSteps)
-                runnerJob = null
-                return@launch
-            }
-
-            val initialPoint = overlayController.resolveInitialPoint(
-                preferredX = activeTapStep.x,
-                preferredY = activeTapStep.y,
-            )
-            val normalizedTaskWithSteps = taskWithSteps.withNormalizedTapPoint(
-                stepId = activeTapStep.id,
-                point = initialPoint,
-            )
-
-            val validationError = taskStartValidator.validate(
-                taskWithSteps = normalizedTaskWithSteps,
-                isAccessibilityEnabled = MyAccessibilityService.isEnabled(appContext),
-            )
-            if (validationError != null) {
-                publishError(validationError)
-                runnerJob = null
-                return@launch
-            }
-
-            activeTapTaskId = normalizedTaskWithSteps.task.id
-            activeTapStepId = activeTapStep.id
-            activeTapPoint.set(initialPoint)
-
-            val overlayShown = overlayController.showTarget(
-                initialPoint = initialPoint,
-                onPointChanged = { point ->
-                    activeTapPoint.set(point)
-                },
-                onDragEnd = { point ->
-                    activeTapPoint.set(point)
-                    persistTapPointAsync(
-                        taskId = normalizedTaskWithSteps.task.id,
-                        stepId = activeTapStep.id,
-                        point = point,
-                    )
-                },
-            )
-            if (!overlayShown) {
-                clearActiveTapSessionLocal()
-                publishError(
-                    if (!overlayController.hasPermission()) {
-                        RunnerError.OverlayPermissionDenied
-                    } else {
-                        RunnerError.Unknown("Unable to show overlay target")
-                    },
-                )
-                runnerJob = null
-                return@launch
-            }
-
-            persistTapPoint(
-                taskId = normalizedTaskWithSteps.task.id,
-                stepId = activeTapStep.id,
-                point = initialPoint,
-            )
-
-            publishProgress(
-                RunnerProgress(
-                    taskId = normalizedTaskWithSteps.task.id,
-                    currentRoundIndex = 0,
-                    currentStepIndex = 0,
-                    currentStepRepeatIndex = 0,
-                ),
-            )
-            publishState(RunnerState.RUNNING)
-
-            try {
-                executeTask(normalizedTaskWithSteps)
-            } catch (_: CancellationException) {
-                if (_runnerState.value == RunnerState.STOPPING) {
-                    resetToIdle()
-                }
-            } catch (throwable: Throwable) {
-                publishError(mapThrowableToRunnerError(throwable))
-                publishState(RunnerState.ERROR)
-                clearActiveTapSession()
-            } finally {
-                if (_runnerState.value != RunnerState.STOPPING) {
-                    runnerJob = null
+            RunnerState.IDLE,
+            RunnerState.COMPLETED,
+            RunnerState.ERROR,
+            -> {
+                engineScope.launch {
+                    startActiveTaskInternal()
                 }
             }
         }
@@ -179,29 +99,39 @@ class TaskRunnerEngine(
     }
 
     fun stop() {
-        when (_runnerState.value) {
-            RunnerState.IDLE -> return
-            RunnerState.RUNNING,
-            RunnerState.PAUSED,
-            RunnerState.STOPPING,
-            RunnerState.COMPLETED,
-            RunnerState.ERROR,
-            -> {
-                publishState(RunnerState.STOPPING)
-                if (runnerJob == null || runnerJob?.isCompleted == true) {
-                    engineScope.launch {
-                        resetToIdle()
-                    }
-                } else {
-                    runnerJob?.cancel()
-                }
+        engineScope.launch {
+            when (_runnerState.value) {
+                RunnerState.IDLE -> Unit
+                RunnerState.RUNNING,
+                RunnerState.PAUSED,
+                RunnerState.STOPPING,
+                -> stopRunnerJobAndResetState(clearError = true)
+
+                RunnerState.COMPLETED,
+                RunnerState.ERROR,
+                -> resetRunnerToIdle(clearError = true)
             }
+        }
+    }
+
+    fun toggleTargetVisibility() {
+        engineScope.launch {
+            toggleTargetVisibilityInternal()
+        }
+    }
+
+    fun exitFloatingMode() {
+        engineScope.launch {
+            stopRunnerJobAndResetState(clearError = true)
+            overlayController.hideFloatingMode(clearTargetPoint = true)
+            clearActiveSessionLocal()
+            publishOverlaySessionState(OverlaySessionState())
         }
     }
 
     fun release() {
         runnerJob?.cancel()
-        clearActiveTapSessionLocal()
+        clearActiveSessionLocal()
         engineScope.cancel()
         overlayController.release()
     }
@@ -216,6 +146,240 @@ class TaskRunnerEngine(
 
     fun requestTaskTemplateClone() {
         // TODO: reserve task template clone entry
+    }
+
+    private fun handleToolbarStartRequested() {
+        when (_runnerState.value) {
+            RunnerState.PAUSED -> resume()
+            RunnerState.RUNNING,
+            RunnerState.STOPPING,
+            -> Unit
+
+            RunnerState.IDLE,
+            RunnerState.COMPLETED,
+            RunnerState.ERROR,
+            -> startActiveTask()
+        }
+    }
+
+    private suspend fun enterFloatingModeInternal(
+        taskId: Long,
+    ) {
+        val taskWithSteps = taskRepository.getTask(taskId)
+        if (taskWithSteps == null) {
+            publishError(RunnerError.TaskNotFound(taskId), showToast = true)
+            return
+        }
+
+        if (!overlayController.hasPermission()) {
+            publishError(RunnerError.OverlayPermissionDenied, showToast = true)
+            return
+        }
+
+        val floatingModeError = taskStartValidator.validateFloatingMode(taskWithSteps)
+        if (floatingModeError != null) {
+            publishError(floatingModeError, showToast = true)
+            return
+        }
+
+        val activeTapStep = findActiveTapStep(taskWithSteps)
+        if (activeTapStep == null) {
+            publishError(RunnerError.NoExecutableSteps, showToast = true)
+            return
+        }
+
+        stopRunnerJobAndResetState(clearError = true)
+        overlayController.hideFloatingMode(clearTargetPoint = true)
+        clearActiveSessionLocal()
+        publishOverlaySessionState(OverlaySessionState())
+
+        val initialPoint = overlayController.resolveInitialPoint(
+            preferredX = activeTapStep.x,
+            preferredY = activeTapStep.y,
+        )
+        val normalizedTaskWithSteps = taskWithSteps.withNormalizedTapPoint(
+            stepId = activeTapStep.id,
+            point = initialPoint,
+        )
+
+        activeTapTaskId = normalizedTaskWithSteps.task.id
+        activeTapStepId = activeTapStep.id
+        activeTapPoint.set(initialPoint)
+
+        val overlayShown = overlayController.showFloatingMode(
+            initialPoint = initialPoint,
+            targetVisible = true,
+            toolbarUiState = createToolbarUiState(targetVisible = true),
+            onPointChanged = { point ->
+                activeTapPoint.set(point)
+            },
+            onDragEnd = { point ->
+                activeTapPoint.set(point)
+                persistTapPointAsync(
+                    taskId = normalizedTaskWithSteps.task.id,
+                    stepId = activeTapStep.id,
+                    point = point,
+                )
+            },
+        )
+        if (!overlayShown) {
+            clearActiveSessionLocal()
+            publishError(
+                error = if (!overlayController.hasPermission()) {
+                    RunnerError.OverlayPermissionDenied
+                } else {
+                    RunnerError.Unknown("Unable to show floating overlay")
+                },
+                showToast = true,
+            )
+            return
+        }
+
+        persistTapPoint(
+            taskId = normalizedTaskWithSteps.task.id,
+            stepId = activeTapStep.id,
+            point = initialPoint,
+        )
+        publishError(null)
+        publishOverlaySessionState(
+            OverlaySessionState(
+                isFloatingModeEnabled = true,
+                activeTaskId = normalizedTaskWithSteps.task.id,
+                isTargetVisible = true,
+            ),
+        )
+    }
+
+    private suspend fun startActiveTaskInternal() {
+        val sessionTaskId = activeTapTaskId
+        if (sessionTaskId == null || !_overlaySessionState.value.isFloatingModeEnabled) {
+            publishError(RunnerError.NoTaskSelected, showToast = true)
+            return
+        }
+
+        val taskWithSteps = taskRepository.getTask(sessionTaskId)
+        if (taskWithSteps == null) {
+            publishError(RunnerError.TaskNotFound(sessionTaskId), showToast = true)
+            return
+        }
+
+        val activeTapStep = resolveSessionTapStep(taskWithSteps)
+        if (activeTapStep == null) {
+            publishError(RunnerError.NoExecutableSteps, showToast = true)
+            return
+        }
+
+        val runtimePoint = activeTapPoint.get()
+            ?: activeTapStep.x?.let { x ->
+                activeTapStep.y?.let { y ->
+                    ScreenPoint(x = x, y = y)
+                }
+            }
+
+        if (runtimePoint == null) {
+            publishError(RunnerError.TapPointNotSet, showToast = true)
+            return
+        }
+
+        val resolvedPoint = overlayController.resolveInitialPoint(
+            preferredX = runtimePoint.x,
+            preferredY = runtimePoint.y,
+        )
+        val normalizedTaskWithSteps = taskWithSteps.withNormalizedTapPoint(
+            stepId = activeTapStep.id,
+            point = resolvedPoint,
+        )
+        val validationError = taskStartValidator.validateStart(
+            taskWithSteps = normalizedTaskWithSteps,
+            isAccessibilityEnabled = MyAccessibilityService.isEnabled(appContext),
+        )
+        if (validationError != null) {
+            publishError(validationError, showToast = true)
+            return
+        }
+
+        activeTapStepId = activeTapStep.id
+        activeTapPoint.set(resolvedPoint)
+        if (_overlaySessionState.value.isTargetVisible) {
+            overlayController.updateTarget(resolvedPoint)
+        }
+        persistTapPoint(
+            taskId = normalizedTaskWithSteps.task.id,
+            stepId = activeTapStep.id,
+            point = resolvedPoint,
+        )
+
+        publishError(null)
+        runnerJob?.cancelAndJoin()
+        launchRunner(normalizedTaskWithSteps)
+    }
+
+    private fun launchRunner(
+        taskWithSteps: TaskWithSteps,
+    ) {
+        runnerJob = engineScope.launch {
+            publishProgress(
+                RunnerProgress(
+                    taskId = taskWithSteps.task.id,
+                    currentRoundIndex = 0,
+                    currentStepIndex = 0,
+                    currentStepRepeatIndex = 0,
+                ),
+            )
+            publishState(RunnerState.RUNNING)
+
+            try {
+                executeTask(taskWithSteps)
+                if (_runnerState.value == RunnerState.RUNNING) {
+                    publishProgress(null)
+                    publishState(RunnerState.COMPLETED)
+                }
+            } catch (cancellationException: CancellationException) {
+                throw cancellationException
+            } catch (throwable: Throwable) {
+                publishError(mapThrowableToRunnerError(throwable), showToast = true)
+                publishProgress(null)
+                publishState(RunnerState.ERROR)
+            } finally {
+                if (runnerJob === coroutineContext[Job]) {
+                    runnerJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun toggleTargetVisibilityInternal() {
+        val sessionState = _overlaySessionState.value
+        if (!sessionState.isFloatingModeEnabled) {
+            publishError(RunnerError.NoTaskSelected, showToast = true)
+            return
+        }
+
+        val targetVisible = !sessionState.isTargetVisible
+        val point = activeTapPoint.get() ?: overlayController.currentTargetPoint()
+        if (targetVisible && point == null) {
+            publishError(RunnerError.TapPointNotSet, showToast = true)
+            return
+        }
+        val updated = overlayController.setTargetVisibility(
+            isVisible = targetVisible,
+            point = point,
+        )
+        if (!updated) {
+            publishError(
+                error = if (!overlayController.hasPermission()) {
+                    RunnerError.OverlayPermissionDenied
+                } else {
+                    RunnerError.Unknown("Unable to update target visibility")
+                },
+                showToast = true,
+            )
+            return
+        }
+
+        publishOverlaySessionState(
+            sessionState.copy(isTargetVisible = targetVisible),
+        )
     }
 
     private suspend fun executeTask(
@@ -248,9 +412,9 @@ class TaskRunnerEngine(
 
                     val dispatched = dispatchStep(step)
                     if (!dispatched) {
-                        publishError(RunnerError.GestureDispatchFailed)
+                        publishError(RunnerError.GestureDispatchFailed, showToast = true)
+                        publishProgress(null)
                         publishState(RunnerState.ERROR)
-                        clearActiveTapSession()
                         return
                     }
 
@@ -262,9 +426,6 @@ class TaskRunnerEngine(
             }
             currentRound += 1
         }
-
-        publishState(RunnerState.COMPLETED)
-        clearActiveTapSession()
     }
 
     private suspend fun dispatchStep(
@@ -332,6 +493,28 @@ class TaskRunnerEngine(
         return true
     }
 
+    private suspend fun stopRunnerJobAndResetState(
+        clearError: Boolean,
+    ) {
+        val job = runnerJob
+        if (job != null) {
+            publishState(RunnerState.STOPPING)
+            job.cancelAndJoin()
+            runnerJob = null
+        }
+        resetRunnerToIdle(clearError = clearError)
+    }
+
+    private fun resetRunnerToIdle(
+        clearError: Boolean,
+    ) {
+        publishProgress(null)
+        publishState(RunnerState.IDLE)
+        if (clearError) {
+            publishError(null)
+        }
+    }
+
     private fun mapThrowableToRunnerError(
         throwable: Throwable,
     ): RunnerError {
@@ -343,14 +526,76 @@ class TaskRunnerEngine(
 
     private fun publishState(state: RunnerState) {
         _runnerState.value = state
+        syncToolbarStateAsync()
     }
 
     private fun publishProgress(progress: RunnerProgress?) {
         _runnerProgress.value = progress
     }
 
-    private fun publishError(error: RunnerError?) {
+    private fun publishError(
+        error: RunnerError?,
+        showToast: Boolean = false,
+    ) {
         _runnerError.value = error
+        if (showToast) {
+            RunnerErrorMessageMapper.map(error)?.let { messageRes ->
+                overlayController.showMessage(messageRes)
+            }
+        }
+    }
+
+    private fun publishOverlaySessionState(
+        state: OverlaySessionState,
+    ) {
+        _overlaySessionState.value = state
+        syncToolbarStateAsync()
+    }
+
+    private fun syncToolbarStateAsync() {
+        val sessionState = _overlaySessionState.value
+        if (!sessionState.isFloatingModeEnabled) {
+            return
+        }
+
+        engineScope.launch {
+            overlayController.updateToolbarState(
+                createToolbarUiState(targetVisible = sessionState.isTargetVisible),
+            )
+        }
+    }
+
+    private fun createToolbarUiState(
+        targetVisible: Boolean = _overlaySessionState.value.isTargetVisible,
+    ): OverlayToolbarUiState {
+        return OverlayToolbarUiState(
+            runnerState = _runnerState.value,
+            isTargetVisible = targetVisible,
+        )
+    }
+
+    private fun findActiveTapStep(
+        taskWithSteps: TaskWithSteps,
+    ): ActionStepEntity? {
+        return taskWithSteps.steps
+            .filter { step ->
+                step.enabled && step.actionType == ActionStepEntity.ACTION_TAP
+            }
+            .sortedBy { step -> step.orderIndex }
+            .firstOrNull()
+    }
+
+    private fun resolveSessionTapStep(
+        taskWithSteps: TaskWithSteps,
+    ): ActionStepEntity? {
+        val sessionStepId = activeTapStepId
+        return taskWithSteps.steps
+            .firstOrNull { step ->
+                step.id == sessionStepId &&
+                    step.enabled &&
+                    step.actionType == ActionStepEntity.ACTION_TAP
+            }
+            ?: findActiveTapStep(taskWithSteps)
     }
 
     private fun resolveRuntimeStep(
@@ -373,12 +618,7 @@ class TaskRunnerEngine(
         }
     }
 
-    private suspend fun clearActiveTapSession() {
-        overlayController.hideTarget()
-        clearActiveTapSessionLocal()
-    }
-
-    private fun clearActiveTapSessionLocal() {
+    private fun clearActiveSessionLocal() {
         activeTapTaskId = null
         activeTapStepId = null
         activeTapPoint.set(null)
@@ -411,13 +651,6 @@ class TaskRunnerEngine(
                 point = point,
             )
         }
-    }
-
-    private suspend fun resetToIdle() {
-        clearActiveTapSession()
-        runnerJob = null
-        publishProgress(null)
-        publishState(RunnerState.IDLE)
     }
 
     private fun TaskWithSteps.withNormalizedTapPoint(

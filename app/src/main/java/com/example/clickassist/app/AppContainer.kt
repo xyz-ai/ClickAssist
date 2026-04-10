@@ -9,6 +9,8 @@ import com.example.clickassist.data.settings.DataStoreSettingsRepository
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.overlay.OverlayController
+import com.example.clickassist.service.overlay.OverlayTargetController
+import com.example.clickassist.service.overlay.OverlayToolbarController
 import com.example.clickassist.service.runner.TaskStartValidator
 import com.example.clickassist.service.runner.TaskRunnerEngine
 
@@ -49,8 +51,22 @@ class DefaultAppContainer(
         DataStoreSettingsRepository(context = appContext)
     }
 
+    private val overlayToolbarController: OverlayToolbarController by lazy {
+        OverlayToolbarController(
+            context = appContext,
+            settingsRepository = settingsRepository,
+        )
+    }
+
+    private val overlayTargetController: OverlayTargetController by lazy {
+        OverlayTargetController(context = appContext)
+    }
+
     override val overlayController: OverlayController by lazy {
-        OverlayController(context = appContext)
+        OverlayController(
+            toolbarController = overlayToolbarController,
+            targetController = overlayTargetController,
+        )
     }
 
     private val taskStartValidator: TaskStartValidator by lazy {

@@ -8,6 +8,7 @@ object RunnerErrorMessageMapper {
     fun map(error: RunnerError?): Int? {
         return when (error) {
             null -> null
+            RunnerError.NoTaskSelected -> R.string.error_no_active_task
             RunnerError.OverlayPermissionDenied -> R.string.error_overlay_permission_denied
             RunnerError.AccessibilityDisabled -> R.string.error_accessibility_disabled
             RunnerError.TapPointNotSet -> R.string.error_tap_point_not_set

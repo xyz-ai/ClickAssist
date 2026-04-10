@@ -7,6 +7,8 @@ data class AppSettings(
     val overlayGuideOpenCount: Int = 0,
     val accessibilityGuideOpenCount: Int = 0,
     val lastEditedTaskId: Long? = null,
+    val overlayToolbarX: Int? = null,
+    val overlayToolbarY: Int? = null,
 )
 
 interface SettingsRepository {
@@ -19,4 +21,9 @@ interface SettingsRepository {
     suspend fun markAccessibilityGuideOpened()
 
     suspend fun setLastEditedTaskId(taskId: Long)
+
+    suspend fun setOverlayToolbarPosition(
+        x: Int,
+        y: Int,
+    )
 }

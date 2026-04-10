@@ -35,6 +35,8 @@ class DataStoreSettingsRepository(
                 overlayGuideOpenCount = preferences[OVERLAY_GUIDE_COUNT_KEY] ?: 0,
                 accessibilityGuideOpenCount = preferences[ACCESSIBILITY_GUIDE_COUNT_KEY] ?: 0,
                 lastEditedTaskId = preferences[LAST_EDITED_TASK_ID_KEY],
+                overlayToolbarX = preferences[OVERLAY_TOOLBAR_X_KEY],
+                overlayToolbarY = preferences[OVERLAY_TOOLBAR_Y_KEY],
             )
         }
 
@@ -63,6 +65,16 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun setOverlayToolbarPosition(
+        x: Int,
+        y: Int,
+    ) {
+        dataStore.edit { preferences ->
+            preferences[OVERLAY_TOOLBAR_X_KEY] = x
+            preferences[OVERLAY_TOOLBAR_Y_KEY] = y
+        }
+    }
+
     private companion object {
         const val DATASTORE_FILE_NAME = "app_settings"
 
@@ -70,6 +82,8 @@ class DataStoreSettingsRepository(
         val OVERLAY_GUIDE_COUNT_KEY = intPreferencesKey("overlay_guide_open_count")
         val ACCESSIBILITY_GUIDE_COUNT_KEY = intPreferencesKey("accessibility_guide_open_count")
         val LAST_EDITED_TASK_ID_KEY = longPreferencesKey("last_edited_task_id")
+        val OVERLAY_TOOLBAR_X_KEY = intPreferencesKey("overlay_toolbar_x")
+        val OVERLAY_TOOLBAR_Y_KEY = intPreferencesKey("overlay_toolbar_y")
     }
 }
 

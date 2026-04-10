@@ -8,6 +8,8 @@
     <string name="common_open_settings">去设置</string>
     <string name="common_status_granted">已开启</string>
     <string name="common_status_missing">未开启</string>
+    <string name="common_status_enabled">已启用</string>
+    <string name="common_status_disabled">未启用</string>
     <string name="common_acknowledge">我知道了</string>
 
     <string name="default_task_name">未命名任务</string>
@@ -15,9 +17,9 @@
     <string name="permission_guide_title">权限引导</string>
     <string name="permission_guide_action_tasks">任务列表</string>
     <string name="permission_overlay_title">悬浮窗权限</string>
-    <string name="permission_overlay_description">用于展示基础悬浮控制面板，当前版本仅显示执行状态，不做动态识别。</string>
+    <string name="permission_overlay_description">用于显示悬浮任务栏和点击点控件，支持在其它应用界面上进行执行控制。</string>
     <string name="permission_accessibility_title">无障碍权限</string>
-    <string name="permission_accessibility_description">用于派发静态手势动作，V1 只执行用户显式配置的步骤。</string>
+    <string name="permission_accessibility_description">用于派发点击、滑动等手势操作，执行当前任务。</string>
     <string name="permission_status_format">当前状态：%1$s</string>
     <string name="permission_local_data_title">本地数据说明</string>
     <string name="permission_local_data_description">任务、步骤和设置仅保存在本地 Room 与 DataStore 中，不联网，不做云同步。</string>
@@ -33,21 +35,22 @@
     <string name="task_list_title">任务列表</string>
     <string name="task_list_action_permissions">权限</string>
     <string name="task_list_empty_title">暂无任务</string>
-    <string name="task_list_empty_description">先创建一个包含 TAP 步骤的本地任务，再从这里快速启动。</string>
-    <string name="task_list_runner_title">运行控制</string>
+    <string name="task_list_empty_description">先创建一个包含 TAP 步骤的本地任务，再从这里快速启动悬浮执行模式。</string>
+    <string name="task_list_runner_title">运行状态</string>
     <string name="task_list_runner_state">当前状态：%1$s</string>
-    <string name="task_list_runner_task">任务#%1$d</string>
+    <string name="task_list_runner_task">任务 #%1$d</string>
     <string name="task_list_runner_round">轮次 %1$d</string>
     <string name="task_list_runner_step">步骤 %1$d</string>
     <string name="task_list_runner_repeat">重复 %1$d</string>
     <string name="task_list_last_edited_task">最近编辑任务：#%1$d</string>
     <string name="task_list_action_pause">暂停</string>
-    <string name="task_list_action_resume">恢复</string>
+    <string name="task_list_action_resume">继续</string>
     <string name="task_list_action_stop">停止</string>
-    <string name="task_list_action_start">快速启动</string>
+    <string name="task_list_action_start">开始</string>
+    <string name="task_list_action_quick_start">快速启动</string>
     <string name="task_list_action_edit">编辑</string>
     <string name="task_list_action_delete">删除</string>
-    <string name="task_list_task_meta">任务#%1$d | %2$s</string>
+    <string name="task_list_task_meta">任务 #%1$d | %2$s</string>
     <string name="task_list_task_enabled">已启用</string>
     <string name="task_list_task_disabled">已禁用</string>
     <string name="task_list_position_set">点击位置：已设置</string>
@@ -57,6 +60,14 @@
     <string name="task_list_repeat_count">重复：%1$d 次</string>
     <string name="task_list_interval_ms">间隔：%1$d ms</string>
     <string name="task_list_coordinate">坐标：(%1$d, %2$d)</string>
+    <string name="task_list_floating_mode">悬浮模式：%1$s</string>
+    <string name="task_list_floating_task">当前悬浮任务：%1$s（#%2$d）</string>
+    <string name="task_list_floating_task_fallback">未命名任务</string>
+    <string name="task_list_target_visibility">点击点状态：%1$s</string>
+    <string name="task_list_target_visible">显示中</string>
+    <string name="task_list_target_hidden">已隐藏</string>
+    <string name="task_list_overlay_control_hint">当前已进入悬浮执行模式，请通过左侧悬浮任务栏控制开始、暂停、停止和点击点显隐。</string>
+    <string name="task_list_quick_start_hint">点击“快速启动”后会进入悬浮执行模式，并显示悬浮任务栏与单点击点控件。</string>
 
     <string name="task_edit_title_new">新建任务</string>
     <string name="task_edit_title_edit">编辑任务</string>
@@ -79,7 +90,7 @@
     <string name="task_edit_action_collapse_advanced">收起高级设置</string>
     <string name="task_edit_label_advanced_x">高级设置 x</string>
     <string name="task_edit_label_advanced_y">高级设置 y</string>
-    <string name="task_edit_advanced_hint">主交互建议使用可视化选点器。高级设置仅作为坐标兜底输入入口。</string>
+    <string name="task_edit_advanced_hint">主交互建议使用可视化选点器。高级设置仅作为坐标手动输入入口。</string>
     <string name="task_edit_action_save_task">保存任务</string>
     <string name="task_edit_action_saving">保存中...</string>
 
@@ -91,7 +102,16 @@
 
     <string name="overlay_state_label">状态：%1$s</string>
     <string name="overlay_progress_idle">进度：空闲</string>
-    <string name="overlay_progress_detail">进度：任务#%1$d 轮次 %2$d 步骤 %3$d 重复 %4$d</string>
+    <string name="overlay_progress_detail">进度：任务 %1$d 轮次 %2$d 步骤 %3$d 重复 %4$d</string>
+    <string name="overlay_action_start">开始</string>
+    <string name="overlay_action_resume">继续</string>
+    <string name="overlay_action_pause">暂停</string>
+    <string name="overlay_action_stop">停止</string>
+    <string name="overlay_action_show_target">显示点击点</string>
+    <string name="overlay_action_hide_target">隐藏点击点</string>
+    <string name="overlay_action_close_floating">关闭悬浮</string>
+    <string name="overlay_action_expand">展开</string>
+    <string name="overlay_action_collapse">收起</string>
 
     <string name="runner_state_idle">空闲</string>
     <string name="runner_state_running">运行中</string>
@@ -100,11 +120,12 @@
     <string name="runner_state_completed">已完成</string>
     <string name="runner_state_error">异常</string>
 
-    <string name="error_overlay_permission_denied">请先开启悬浮窗权限</string>
-    <string name="error_accessibility_disabled">请先开启无障碍服务</string>
-    <string name="error_tap_point_not_set">请先选择点击位置</string>
+    <string name="error_no_active_task">当前无可执行任务</string>
+    <string name="error_overlay_permission_denied">悬浮权限未开启</string>
+    <string name="error_accessibility_disabled">无障碍服务未启用</string>
+    <string name="error_tap_point_not_set">当前任务未设置点击位置</string>
     <string name="error_tap_point_out_of_bounds">点击位置超出当前屏幕范围，请重新选择</string>
-    <string name="error_no_executable_steps">当前任务没有可执行步骤</string>
+    <string name="error_no_executable_steps">当前任务无可执行步骤</string>
     <string name="error_invalid_repeat_count">重复次数必须大于 0</string>
     <string name="error_invalid_interval_ms">点击间隔不能小于 1 ms</string>
     <string name="error_invalid_total_rounds">总轮次必须大于 0，或开启无限轮次</string>

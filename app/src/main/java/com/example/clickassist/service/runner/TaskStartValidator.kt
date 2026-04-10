@@ -14,7 +14,25 @@ class TaskStartValidator(
     private val appContext = context.applicationContext
     private val windowManager = appContext.getSystemService(WindowManager::class.java)
 
-    fun validate(
+    fun validateFloatingMode(
+        taskWithSteps: TaskWithSteps,
+    ): RunnerError? {
+        val enabledTapStep = taskWithSteps.steps
+            .filter { step ->
+                step.enabled && step.actionType == ActionStepEntity.ACTION_TAP
+            }
+            .sortedBy { step -> step.orderIndex }
+            .firstOrNull()
+            ?: return RunnerError.NoExecutableSteps
+
+        if (enabledTapStep.x == null || enabledTapStep.y == null) {
+            return RunnerError.TapPointNotSet
+        }
+
+        return null
+    }
+
+    fun validateStart(
         taskWithSteps: TaskWithSteps,
         isAccessibilityEnabled: Boolean,
     ): RunnerError? {

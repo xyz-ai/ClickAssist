@@ -73,9 +73,10 @@ fun TaskListScreen(
                     runnerProgress = uiState.runnerProgress,
                     lastEditedTaskId = uiState.lastEditedTaskId,
                     runnerErrorMessageRes = uiState.runnerErrorMessageRes,
-                    onPause = viewModel::pauseTask,
-                    onResume = viewModel::resumeTask,
-                    onStop = viewModel::stopTask,
+                    isFloatingModeEnabled = uiState.isFloatingModeEnabled,
+                    activeFloatingTaskId = uiState.activeFloatingTaskId,
+                    activeFloatingTaskName = uiState.activeFloatingTaskName,
+                    isFloatingTargetVisible = uiState.isFloatingTargetVisible,
                 )
             }
 
@@ -107,7 +108,7 @@ fun TaskListScreen(
                         taskWithSteps = taskWithSteps,
                         onEdit = { onEditTask(taskWithSteps.task.id) },
                         onDelete = { viewModel.deleteTask(taskWithSteps.task.id) },
-                        onStart = { viewModel.startTask(taskWithSteps.task.id) },
+                        onQuickStart = { viewModel.enterFloatingMode(taskWithSteps.task.id) },
                     )
                 }
             }
@@ -121,9 +122,10 @@ private fun RunnerCard(
     runnerProgress: RunnerProgress?,
     lastEditedTaskId: Long?,
     runnerErrorMessageRes: Int?,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onStop: () -> Unit,
+    isFloatingModeEnabled: Boolean,
+    activeFloatingTaskId: Long?,
+    activeFloatingTaskName: String?,
+    isFloatingTargetVisible: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -141,6 +143,39 @@ private fun RunnerCard(
                     stringResource(runnerStateRes(runnerState)),
                 ),
             )
+            Text(
+                text = stringResource(
+                    R.string.task_list_floating_mode,
+                    stringResource(
+                        if (isFloatingModeEnabled) {
+                            R.string.common_status_enabled
+                        } else {
+                            R.string.common_status_disabled
+                        },
+                    ),
+                ),
+            )
+            if (activeFloatingTaskId != null) {
+                Text(
+                    text = stringResource(
+                        R.string.task_list_floating_task,
+                        activeFloatingTaskName ?: stringResource(R.string.task_list_floating_task_fallback),
+                        activeFloatingTaskId,
+                    ),
+                )
+            }
+            Text(
+                text = stringResource(
+                    R.string.task_list_target_visibility,
+                    stringResource(
+                        if (isFloatingTargetVisible) {
+                            R.string.task_list_target_visible
+                        } else {
+                            R.string.task_list_target_hidden
+                        },
+                    ),
+                ),
+            )
             runnerProgress?.let { progress ->
                 Text(text = stringResource(R.string.task_list_runner_task, progress.taskId))
                 Text(text = stringResource(R.string.task_list_runner_round, progress.currentRoundIndex + 1))
@@ -156,28 +191,18 @@ private fun RunnerCard(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = onPause,
-                    enabled = runnerState == RunnerState.RUNNING,
-                ) {
-                    Text(text = stringResource(R.string.task_list_action_pause))
-                }
-                Button(
-                    onClick = onResume,
-                    enabled = runnerState == RunnerState.PAUSED,
-                ) {
-                    Text(text = stringResource(R.string.task_list_action_resume))
-                }
-                OutlinedButton(
-                    onClick = onStop,
-                    enabled = runnerState != RunnerState.IDLE,
-                ) {
-                    Text(text = stringResource(R.string.task_list_action_stop))
-                }
+            if (isFloatingModeEnabled) {
+                Text(
+                    text = stringResource(R.string.task_list_overlay_control_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.task_list_quick_start_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }
@@ -188,7 +213,7 @@ private fun TaskCard(
     taskWithSteps: TaskWithSteps,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    onStart: () -> Unit,
+    onQuickStart: () -> Unit,
 ) {
     val task = taskWithSteps.task
     val firstStep = taskWithSteps.steps.firstOrNull()
@@ -262,10 +287,10 @@ private fun TaskCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
-                    onClick = onStart,
+                    onClick = onQuickStart,
                     enabled = task.enabled,
                 ) {
-                    Text(text = stringResource(R.string.task_list_action_start))
+                    Text(text = stringResource(R.string.task_list_action_quick_start))
                 }
                 OutlinedButton(onClick = onEdit) {
                     Text(text = stringResource(R.string.task_list_action_edit))

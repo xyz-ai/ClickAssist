@@ -1,6 +1,8 @@
 package com.example.clickassist.service.runner
 
 sealed interface RunnerError {
+    data object NoTaskSelected : RunnerError
+
     data object OverlayPermissionDenied : RunnerError
 
     data object AccessibilityDisabled : RunnerError

@@ -25,6 +25,10 @@ data class TaskListUiState(
     @StringRes
     val runnerErrorMessageRes: Int? = null,
     val lastEditedTaskId: Long? = null,
+    val isFloatingModeEnabled: Boolean = false,
+    val activeFloatingTaskId: Long? = null,
+    val activeFloatingTaskName: String? = null,
+    val isFloatingTargetVisible: Boolean = false,
 )
 
 class TaskListViewModel(
@@ -32,19 +36,39 @@ class TaskListViewModel(
     private val settingsRepository: SettingsRepository,
     private val taskRunnerEngine: TaskRunnerEngine,
 ) : ViewModel() {
-    val uiState: StateFlow<TaskListUiState> = combine(
+    private val baseUiState = combine(
         taskRepository.observeTasks(),
         settingsRepository.settingsFlow,
         taskRunnerEngine.runnerState,
         taskRunnerEngine.runnerProgress,
         taskRunnerEngine.runnerError,
     ) { tasks, settings, runnerState, runnerProgress, runnerError ->
-        TaskListUiState(
+        BaseTaskListState(
             tasks = tasks,
             runnerState = runnerState,
             runnerProgress = runnerProgress,
             runnerErrorMessageRes = RunnerErrorMessageMapper.map(runnerError),
             lastEditedTaskId = settings.lastEditedTaskId,
+        )
+    }
+
+    val uiState: StateFlow<TaskListUiState> = combine(
+        baseUiState,
+        taskRunnerEngine.overlaySessionState,
+    ) { baseState, overlaySession ->
+        TaskListUiState(
+            tasks = baseState.tasks,
+            runnerState = baseState.runnerState,
+            runnerProgress = baseState.runnerProgress,
+            runnerErrorMessageRes = baseState.runnerErrorMessageRes,
+            lastEditedTaskId = baseState.lastEditedTaskId,
+            isFloatingModeEnabled = overlaySession.isFloatingModeEnabled,
+            activeFloatingTaskId = overlaySession.activeTaskId,
+            activeFloatingTaskName = baseState.tasks
+                .firstOrNull { item -> item.task.id == overlaySession.activeTaskId }
+                ?.task
+                ?.name,
+            isFloatingTargetVisible = overlaySession.isTargetVisible,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -52,8 +76,8 @@ class TaskListViewModel(
         initialValue = TaskListUiState(),
     )
 
-    fun startTask(taskId: Long) {
-        taskRunnerEngine.start(taskId)
+    fun enterFloatingMode(taskId: Long) {
+        taskRunnerEngine.enterFloatingMode(taskId)
     }
 
     fun pauseTask() {
@@ -88,4 +112,13 @@ class TaskListViewModel(
             }
         }
     }
+
+    private data class BaseTaskListState(
+        val tasks: List<TaskWithSteps> = emptyList(),
+        val runnerState: RunnerState = RunnerState.IDLE,
+        val runnerProgress: RunnerProgress? = null,
+        @StringRes
+        val runnerErrorMessageRes: Int? = null,
+        val lastEditedTaskId: Long? = null,
+    )
 }

@@ -108,10 +108,12 @@ class MyAccessibilityService : AccessibilityService() {
         y: Int,
         durationMs: Long,
     ): Boolean {
+        val safeDuration = durationMs.coerceAtLeast(500L)
+        Log.i(TAG, "dispatchLongPress requested x=$x y=$y durationMs=$safeDuration")
         return dispatchTap(
             x = x,
             y = y,
-            durationMs = durationMs.coerceAtLeast(500L),
+            durationMs = safeDuration,
         )
     }
 

@@ -7,6 +7,7 @@ import android.util.DisplayMetrics
 import android.view.WindowManager
 import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskWithSteps
+import com.example.clickassist.domain.model.ActionType
 
 class TaskStartValidator(
     context: Context,
@@ -17,19 +18,7 @@ class TaskStartValidator(
     fun validateFloatingMode(
         taskWithSteps: TaskWithSteps,
     ): RunnerError? {
-        val enabledTapStep = taskWithSteps.steps
-            .filter { step ->
-                step.enabled && step.actionType == ActionStepEntity.ACTION_TAP
-            }
-            .sortedBy { step -> step.orderIndex }
-            .firstOrNull()
-            ?: return RunnerError.NoExecutableSteps
-
-        if (enabledTapStep.x == null || enabledTapStep.y == null) {
-            return RunnerError.TapPointNotSet
-        }
-
-        return null
+        return if (taskWithSteps.steps.any { it.enabled }) null else RunnerError.NoExecutableSteps
     }
 
     fun validateStart(
@@ -64,19 +53,69 @@ class TaskStartValidator(
                 return RunnerError.InvalidIntervalMs(stepIndex = index)
             }
 
-            if (step.actionType == ActionStepEntity.ACTION_TAP) {
-                val x = step.x
-                val y = step.y
-                if (x == null || y == null) {
-                    return RunnerError.TapPointNotSet
+            when (step.actionTypeEnum()) {
+                ActionType.TAP -> {
+                    val x = step.x
+                    val y = step.y
+                    if (x == null || y == null) {
+                        return RunnerError.TapPointNotSet
+                    }
+                    if (x !in 0 until screenBounds.width || y !in 0 until screenBounds.height) {
+                        return RunnerError.TapPointOutOfBounds(
+                            x = x,
+                            y = y,
+                            screenWidth = screenBounds.width,
+                            screenHeight = screenBounds.height,
+                        )
+                    }
                 }
-                if (x !in 0 until screenBounds.width || y !in 0 until screenBounds.height) {
-                    return RunnerError.TapPointOutOfBounds(
-                        x = x,
-                        y = y,
-                        screenWidth = screenBounds.width,
-                        screenHeight = screenBounds.height,
-                    )
+
+                ActionType.LONG_PRESS -> {
+                    val x = step.x
+                    val y = step.y
+                    if (x == null || y == null) {
+                        return RunnerError.LongPressPointNotSet
+                    }
+                    if (step.durationMs < 1L) {
+                        return RunnerError.InvalidDurationMs(stepIndex = index)
+                    }
+                    if (x !in 0 until screenBounds.width || y !in 0 until screenBounds.height) {
+                        return RunnerError.TapPointOutOfBounds(
+                            x = x,
+                            y = y,
+                            screenWidth = screenBounds.width,
+                            screenHeight = screenBounds.height,
+                        )
+                    }
+                }
+
+                ActionType.SWIPE -> {
+                    val startX = step.x
+                    val startY = step.y
+                    val endX = step.endX
+                    val endY = step.endY
+                    if (startX == null || startY == null || endX == null || endY == null) {
+                        return RunnerError.SwipePointNotSet
+                    }
+                    if (step.durationMs < 1L) {
+                        return RunnerError.InvalidDurationMs(stepIndex = index)
+                    }
+                    val allInBounds = startX in 0 until screenBounds.width &&
+                        startY in 0 until screenBounds.height &&
+                        endX in 0 until screenBounds.width &&
+                        endY in 0 until screenBounds.height
+                    if (!allInBounds) {
+                        return RunnerError.SwipePointOutOfBounds(
+                            screenWidth = screenBounds.width,
+                            screenHeight = screenBounds.height,
+                        )
+                    }
+                }
+
+                ActionType.WAIT -> {
+                    if (step.durationMs < 1L) {
+                        return RunnerError.InvalidDurationMs(stepIndex = index)
+                    }
                 }
             }
         }

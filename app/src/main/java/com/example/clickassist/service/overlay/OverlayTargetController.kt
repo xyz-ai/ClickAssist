@@ -27,220 +27,218 @@ class OverlayTargetController(
     private val markerSizePx = (MARKER_SIZE_DP * appContext.resources.displayMetrics.density).roundToInt()
     private val markerHalfSizePx = markerSizePx / 2
 
-    private var targetView: TargetMarkerView? = null
-    private var targetLayoutParams: WindowManager.LayoutParams? = null
-    private var currentPoint: ScreenPoint? = null
-    private var dragTouchOffsetX = 0f
-    private var dragTouchOffsetY = 0f
-    private var onPointChangedCallback: ((ScreenPoint) -> Unit)? = null
-    private var onDragEndCallback: ((ScreenPoint) -> Unit)? = null
+    private val markerEntries = linkedMapOf<String, MarkerEntry>()
+    private val currentPoints = linkedMapOf<String, ScreenPoint>()
+
+    private var onMarkerChangedCallback: ((String, ScreenPoint) -> Unit)? = null
+    private var onMarkerDragEndCallback: ((String, ScreenPoint) -> Unit)? = null
+    private var onMarkerSelectedCallback: ((String) -> Unit)? = null
     private var isTouchEnabled: Boolean = true
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
-    fun currentPoint(): ScreenPoint? = currentPoint
+    fun isTargetVisible(): Boolean = markerEntries.values.any { entry -> entry.view.parent != null }
 
-    fun isTargetVisible(): Boolean = targetView?.parent != null
+    fun currentMarkerPoint(markerId: String): ScreenPoint? = currentPoints[markerId]
+
+    fun currentMarkerPoints(): Map<String, ScreenPoint> = currentPoints.toMap()
 
     fun resolveInitialPoint(
         preferredX: Int?,
         preferredY: Int?,
     ): ScreenPoint {
         val bounds = getScreenBounds()
-        val fallbackPoint = ScreenPoint(
-            x = preferredX ?: bounds.width / 2,
-            y = preferredY ?: bounds.height / 2,
-        )
         return clampPoint(
-            point = fallbackPoint,
+            point = ScreenPoint(
+                x = preferredX ?: bounds.width / 2,
+                y = preferredY ?: bounds.height / 2,
+            ),
             bounds = bounds,
         )
     }
 
-    suspend fun showTarget(
-        initialPoint: ScreenPoint,
-        onPointChanged: (ScreenPoint) -> Unit,
-        onDragEnd: (ScreenPoint) -> Unit,
+    suspend fun showMarkers(
+        markers: List<OverlayMarkerModel>,
+        onMarkerChanged: (String, ScreenPoint) -> Unit,
+        onMarkerDragEnd: (String, ScreenPoint) -> Unit,
+        onMarkerSelected: (String) -> Unit,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         if (!hasPermission()) {
             return@withContext false
         }
 
-        onPointChangedCallback = onPointChanged
-        onDragEndCallback = onDragEnd
+        onMarkerChangedCallback = onMarkerChanged
+        onMarkerDragEndCallback = onMarkerDragEnd
+        onMarkerSelectedCallback = onMarkerSelected
 
-        val clampedPoint = resolveInitialPoint(
-            preferredX = initialPoint.x,
-            preferredY = initialPoint.y,
-        )
-        val view = ensureTargetViewInternal()
-        val layoutParams = (targetLayoutParams ?: createLayoutParams()).also {
-            targetLayoutParams = it
-        }
-        layoutParams.flags = targetFlags()
-
-        applyPointToLayoutParams(
-            layoutParams = layoutParams,
-            point = clampedPoint,
-        )
-        currentPoint = clampedPoint
-        Log.i(TAG, "showTarget point=$clampedPoint touchEnabled=$isTouchEnabled")
-
-        runCatching {
-            if (view.parent == null) {
-                windowManager.addView(view, layoutParams)
-            } else {
-                windowManager.updateViewLayout(view, layoutParams)
-            }
-        }.isSuccess
+        syncMarkersInternal(markers)
     }
 
-    suspend fun updateTarget(
-        point: ScreenPoint,
+    suspend fun updateMarkers(
+        markers: List<OverlayMarkerModel>,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         if (!hasPermission()) {
             return@withContext false
         }
 
-        val clampedPoint = resolveInitialPoint(
-            preferredX = point.x,
-            preferredY = point.y,
-        )
-        val layoutParams = (targetLayoutParams ?: createLayoutParams()).also {
-            targetLayoutParams = it
-        }
-        layoutParams.flags = targetFlags()
-        applyPointToLayoutParams(
-            layoutParams = layoutParams,
-            point = clampedPoint,
-        )
-        currentPoint = clampedPoint
-        Log.d(TAG, "updateTarget point=$clampedPoint touchEnabled=$isTouchEnabled")
-
-        val view = targetView
-        if (view?.parent != null) {
-            runCatching {
-                windowManager.updateViewLayout(view, layoutParams)
-            }.isSuccess
-        } else {
-            true
-        }
+        syncMarkersInternal(markers)
     }
 
-    suspend fun hideTarget(
-        clearPoint: Boolean = false,
+    suspend fun hideTargets(
+        clearPoints: Boolean = false,
     ) = withContext(Dispatchers.Main.immediate) {
-        Log.i(TAG, "hideTarget clearPoint=$clearPoint")
-        hideTargetInternal(clearPoint = clearPoint)
+        Log.i(TAG, "hideTargets clearPoints=$clearPoints")
+        hideTargetsInternal(clearPoints)
     }
 
     suspend fun setTouchEnabled(
         enabled: Boolean,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         isTouchEnabled = enabled
-        val layoutParams = targetLayoutParams ?: return@withContext true
-        layoutParams.flags = targetFlags()
-        val view = targetView
-        Log.i(TAG, "setTouchEnabled enabled=$enabled attached=${view?.parent != null}")
-
-        if (view?.parent != null) {
-            runCatching {
-                windowManager.updateViewLayout(view, layoutParams)
-            }.isSuccess
-        } else {
-            true
+        Log.i(TAG, "setTouchEnabled enabled=$enabled markerCount=${markerEntries.size}")
+        markerEntries.values.all { entry ->
+            entry.layoutParams.flags = targetFlags()
+            val attached = entry.view.parent != null
+            if (!attached) {
+                true
+            } else {
+                runCatching {
+                    windowManager.updateViewLayout(entry.view, entry.layoutParams)
+                }.isSuccess
+            }
         }
     }
 
     fun release() {
         runOnMain {
-            hideTargetInternal(clearPoint = true)
-            targetView = null
-            targetLayoutParams = null
-            currentPoint = null
-            onPointChangedCallback = null
-            onDragEndCallback = null
+            hideTargetsInternal(clearPoints = true)
+            markerEntries.clear()
+            currentPoints.clear()
+            onMarkerChangedCallback = null
+            onMarkerDragEndCallback = null
+            onMarkerSelectedCallback = null
+            isTouchEnabled = true
         }
     }
 
-    private fun createLayoutParams(): WindowManager.LayoutParams {
-        return WindowManager.LayoutParams(
-            markerSizePx,
-            markerSizePx,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            targetFlags(),
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 0
+    private fun syncMarkersInternal(
+        markers: List<OverlayMarkerModel>,
+    ): Boolean {
+        val nextIds = markers.map { it.markerId }.toSet()
+        val obsoleteIds = markerEntries.keys.filterNot { it in nextIds }
+        obsoleteIds.forEach { markerId ->
+            markerEntries.remove(markerId)?.let { entry ->
+                if (entry.view.parent != null) {
+                    runCatching { windowManager.removeView(entry.view) }
+                }
+            }
+            currentPoints.remove(markerId)
         }
+
+        val bounds = getScreenBounds()
+        markers.forEach { model ->
+            val entry = markerEntries[model.markerId] ?: createMarkerEntry(model.markerId).also {
+                markerEntries[model.markerId] = it
+            }
+            entry.view.bind(
+                label = model.label,
+                actionType = model.actionType,
+                role = model.role,
+                isSelected = model.isSelected,
+            )
+            entry.view.contentDescription = appContext.getString(
+                R.string.overlay_target_description_with_label,
+                model.label,
+            )
+            entry.layoutParams.flags = targetFlags()
+            val point = clampPoint(model.point, bounds)
+            applyPointToLayoutParams(entry.layoutParams, point)
+            currentPoints[model.markerId] = point
+            Log.d(
+                TAG,
+                "syncMarkers markerId=${model.markerId} stepId=${model.stepId} label=${model.label} point=$point selected=${model.isSelected}",
+            )
+            runCatching {
+                if (entry.view.parent == null) {
+                    windowManager.addView(entry.view, entry.layoutParams)
+                } else {
+                    windowManager.updateViewLayout(entry.view, entry.layoutParams)
+                }
+            }.onFailure { throwable ->
+                Log.e(TAG, "syncMarkers failed markerId=${model.markerId}", throwable)
+            }
+        }
+
+        return true
     }
 
-    private fun ensureTargetViewInternal(): TargetMarkerView {
-        targetView?.let { return it }
-
-        return TargetMarkerView(appContext).apply {
-            contentDescription = appContext.getString(R.string.overlay_target_description)
+    private fun createMarkerEntry(
+        markerId: String,
+    ): MarkerEntry {
+        val view = TargetMarkerView(appContext).apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             isClickable = true
-            setOnTouchListener { _, event ->
-                handleTargetTouch(event)
-            }
-        }.also { view ->
-            targetView = view
+            setOnTouchListener { _, event -> handleMarkerTouch(markerId, event) }
         }
+
+        return MarkerEntry(
+            view = view,
+            layoutParams = createLayoutParams(),
+        )
     }
 
-    private fun handleTargetTouch(event: MotionEvent): Boolean {
-        val view = targetView ?: return false
-        val layoutParams = targetLayoutParams ?: return false
-
+    private fun handleMarkerTouch(
+        markerId: String,
+        event: MotionEvent,
+    ): Boolean {
+        val entry = markerEntries[markerId] ?: return false
         return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                dragTouchOffsetX = event.x
-                dragTouchOffsetY = event.y
-                Log.d(TAG, "drag start rawX=${event.rawX} rawY=${event.rawY} currentPoint=$currentPoint")
+                entry.dragTouchOffsetX = event.x
+                entry.dragTouchOffsetY = event.y
+                onMarkerSelectedCallback?.invoke(markerId)
+                Log.d(TAG, "drag start markerId=$markerId rawX=${event.rawX} rawY=${event.rawY}")
                 true
             }
 
             MotionEvent.ACTION_MOVE -> {
                 val bounds = getScreenBounds()
-                val clampedLeft = (event.rawX - dragTouchOffsetX).roundToInt()
+                val clampedLeft = (event.rawX - entry.dragTouchOffsetX).roundToInt()
                     .coerceIn(0, (bounds.width - markerSizePx).coerceAtLeast(0))
-                val clampedTop = (event.rawY - dragTouchOffsetY).roundToInt()
+                val clampedTop = (event.rawY - entry.dragTouchOffsetY).roundToInt()
                     .coerceIn(0, (bounds.height - markerSizePx).coerceAtLeast(0))
                 val point = ScreenPoint(
                     x = clampedLeft + markerHalfSizePx,
                     y = clampedTop + markerHalfSizePx,
                 )
 
-                layoutParams.x = clampedLeft
-                layoutParams.y = clampedTop
-                currentPoint = point
+                entry.layoutParams.x = clampedLeft
+                entry.layoutParams.y = clampedTop
+                currentPoints[markerId] = point
 
                 runCatching {
-                    if (view.parent != null) {
-                        windowManager.updateViewLayout(view, layoutParams)
+                    if (entry.view.parent != null) {
+                        windowManager.updateViewLayout(entry.view, entry.layoutParams)
                     }
                 }
-                onPointChangedCallback?.invoke(point)
+                onMarkerChangedCallback?.invoke(markerId, point)
                 true
             }
 
             MotionEvent.ACTION_UP -> {
-                view.performClick()
-                currentPoint?.let { point ->
-                    Log.i(TAG, "drag end point=$point")
-                    onDragEndCallback?.invoke(point)
+                entry.view.performClick()
+                currentPoints[markerId]?.let { point ->
+                    Log.i(TAG, "drag end markerId=$markerId point=$point")
+                    onMarkerSelectedCallback?.invoke(markerId)
+                    onMarkerDragEndCallback?.invoke(markerId, point)
                 }
                 true
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                currentPoint?.let { point ->
-                    Log.i(TAG, "drag cancelled point=$point")
-                    onDragEndCallback?.invoke(point)
+                currentPoints[markerId]?.let { point ->
+                    Log.i(TAG, "drag cancel markerId=$markerId point=$point")
+                    onMarkerDragEndCallback?.invoke(markerId, point)
                 }
                 true
             }
@@ -253,13 +251,8 @@ class OverlayTargetController(
         layoutParams: WindowManager.LayoutParams,
         point: ScreenPoint,
     ) {
-        val clampedPoint = clampPoint(
-            point = point,
-            bounds = getScreenBounds(),
-        )
-        currentPoint = clampedPoint
-        layoutParams.x = (clampedPoint.x - markerHalfSizePx).coerceAtLeast(0)
-        layoutParams.y = (clampedPoint.y - markerHalfSizePx).coerceAtLeast(0)
+        layoutParams.x = (point.x - markerHalfSizePx).coerceAtLeast(0)
+        layoutParams.y = (point.y - markerHalfSizePx).coerceAtLeast(0)
     }
 
     private fun clampPoint(
@@ -277,17 +270,31 @@ class OverlayTargetController(
         )
     }
 
-    private fun hideTargetInternal(
-        clearPoint: Boolean,
+    private fun hideTargetsInternal(
+        clearPoints: Boolean,
     ) {
-        val view = targetView
-        if (view?.parent != null) {
-            runCatching {
-                windowManager.removeView(view)
+        markerEntries.values.forEach { entry ->
+            if (entry.view.parent != null) {
+                runCatching { windowManager.removeView(entry.view) }
             }
         }
-        if (clearPoint) {
-            currentPoint = null
+        markerEntries.clear()
+        if (clearPoints) {
+            currentPoints.clear()
+        }
+    }
+
+    private fun createLayoutParams(): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            markerSizePx,
+            markerSizePx,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            targetFlags(),
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
         }
     }
 
@@ -307,14 +314,6 @@ class OverlayTargetController(
         )
     }
 
-    private fun runOnMain(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            block()
-        } else {
-            mainHandler.post(block)
-        }
-    }
-
     private fun targetFlags(): Int {
         var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
@@ -323,6 +322,21 @@ class OverlayTargetController(
         }
         return flags
     }
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    private data class MarkerEntry(
+        val view: TargetMarkerView,
+        val layoutParams: WindowManager.LayoutParams,
+        var dragTouchOffsetX: Float = 0f,
+        var dragTouchOffsetY: Float = 0f,
+    )
 
     private data class ScreenBounds(
         val width: Int,

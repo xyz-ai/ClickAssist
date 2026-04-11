@@ -11,9 +11,18 @@ sealed interface RunnerError {
 
     data object TapPointNotSet : RunnerError
 
+    data object LongPressPointNotSet : RunnerError
+
+    data object SwipePointNotSet : RunnerError
+
     data class TapPointOutOfBounds(
         val x: Int?,
         val y: Int?,
+        val screenWidth: Int,
+        val screenHeight: Int,
+    ) : RunnerError
+
+    data class SwipePointOutOfBounds(
         val screenWidth: Int,
         val screenHeight: Int,
     ) : RunnerError
@@ -25,6 +34,10 @@ sealed interface RunnerError {
     ) : RunnerError
 
     data class InvalidIntervalMs(
+        val stepIndex: Int,
+    ) : RunnerError
+
+    data class InvalidDurationMs(
         val stepIndex: Int,
     ) : RunnerError
 

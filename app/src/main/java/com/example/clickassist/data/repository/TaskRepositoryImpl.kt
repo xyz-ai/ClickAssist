@@ -51,6 +51,24 @@ class TaskRepositoryImpl(
         )
     }
 
+    override suspend fun updateSwipeStepPosition(
+        taskId: Long,
+        stepId: Long,
+        startX: Int,
+        startY: Int,
+        endX: Int,
+        endY: Int,
+    ) {
+        taskDao.updateSwipeStepPosition(
+            taskId = taskId,
+            stepId = stepId,
+            startX = startX,
+            startY = startY,
+            endX = endX,
+            endY = endY,
+        )
+    }
+
     override suspend fun deleteTask(taskId: Long) {
         taskDao.deleteTaskById(taskId)
     }

@@ -24,5 +24,14 @@ interface TaskRepository {
         y: Int,
     )
 
+    suspend fun updateSwipeStepPosition(
+        taskId: Long,
+        stepId: Long,
+        startX: Int,
+        startY: Int,
+        endX: Int,
+        endY: Int,
+    )
+
     suspend fun deleteTask(taskId: Long)
 }

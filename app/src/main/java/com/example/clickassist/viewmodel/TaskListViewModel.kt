@@ -29,6 +29,10 @@ data class TaskListUiState(
     val activeFloatingTaskId: Long? = null,
     val activeFloatingTaskName: String? = null,
     val isFloatingTargetVisible: Boolean = false,
+    val isFloatingMultiPointMode: Boolean = false,
+    val floatingStepCount: Int = 0,
+    val floatingSelectedStepOrder: Int? = null,
+    val floatingSelectedStepActionType: String? = null,
 )
 
 class TaskListViewModel(
@@ -69,6 +73,10 @@ class TaskListViewModel(
                 ?.task
                 ?.name,
             isFloatingTargetVisible = overlaySession.isTargetVisible,
+            isFloatingMultiPointMode = overlaySession.isMultiPointMode,
+            floatingStepCount = overlaySession.stepCount,
+            floatingSelectedStepOrder = overlaySession.selectedStepOrder,
+            floatingSelectedStepActionType = overlaySession.selectedStepActionType,
         )
     }.stateIn(
         scope = viewModelScope,

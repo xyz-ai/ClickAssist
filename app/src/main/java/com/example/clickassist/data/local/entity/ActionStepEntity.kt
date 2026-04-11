@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.example.clickassist.domain.model.ActionType
 
 @Entity(
     tableName = "action_steps",
@@ -36,8 +37,11 @@ data class ActionStepEntity(
     val postDelayMs: Long = 0L,
     val enabled: Boolean = true,
 ) {
+    fun actionTypeEnum(): ActionType = ActionType.fromStorage(actionType)
+
     companion object {
         const val ACTION_TAP = "TAP"
+        const val ACTION_LONG_PRESS = "LONG_PRESS"
         const val ACTION_SWIPE = "SWIPE"
         const val ACTION_WAIT = "WAIT"
     }

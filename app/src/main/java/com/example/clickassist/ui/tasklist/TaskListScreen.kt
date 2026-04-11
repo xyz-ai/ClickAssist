@@ -26,7 +26,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.clickassist.R
+import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskWithSteps
+import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.service.runner.RunnerProgress
 import com.example.clickassist.service.runner.RunnerState
 import com.example.clickassist.viewmodel.TaskListViewModel
@@ -77,6 +79,10 @@ fun TaskListScreen(
                     activeFloatingTaskId = uiState.activeFloatingTaskId,
                     activeFloatingTaskName = uiState.activeFloatingTaskName,
                     isFloatingTargetVisible = uiState.isFloatingTargetVisible,
+                    isFloatingMultiPointMode = uiState.isFloatingMultiPointMode,
+                    floatingStepCount = uiState.floatingStepCount,
+                    floatingSelectedStepOrder = uiState.floatingSelectedStepOrder,
+                    floatingSelectedStepActionType = uiState.floatingSelectedStepActionType,
                 )
             }
 
@@ -126,6 +132,10 @@ private fun RunnerCard(
     activeFloatingTaskId: Long?,
     activeFloatingTaskName: String?,
     isFloatingTargetVisible: Boolean,
+    isFloatingMultiPointMode: Boolean,
+    floatingStepCount: Int,
+    floatingSelectedStepOrder: Int?,
+    floatingSelectedStepActionType: String?,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -137,24 +147,26 @@ private fun RunnerCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = stringResource(
-                    R.string.task_list_runner_state,
-                    stringResource(runnerStateRes(runnerState)),
-                ),
-            )
+            Text(text = stringResource(R.string.task_list_runner_state, stringResource(runnerStateRes(runnerState))))
             Text(
                 text = stringResource(
                     R.string.task_list_floating_mode,
                     stringResource(
-                        if (isFloatingModeEnabled) {
-                            R.string.common_status_enabled
-                        } else {
-                            R.string.common_status_disabled
-                        },
+                        if (isFloatingModeEnabled) R.string.common_status_enabled else R.string.common_status_disabled,
                     ),
                 ),
             )
+            if (isFloatingModeEnabled) {
+                Text(
+                    text = stringResource(
+                        R.string.task_list_task_mode,
+                        stringResource(
+                            if (isFloatingMultiPointMode) R.string.task_mode_multi_point else R.string.task_mode_single_point,
+                        ),
+                    ),
+                )
+                Text(text = stringResource(R.string.task_list_step_count, floatingStepCount))
+            }
             if (activeFloatingTaskId != null) {
                 Text(
                     text = stringResource(
@@ -168,14 +180,19 @@ private fun RunnerCard(
                 text = stringResource(
                     R.string.task_list_target_visibility,
                     stringResource(
-                        if (isFloatingTargetVisible) {
-                            R.string.task_list_target_visible
-                        } else {
-                            R.string.task_list_target_hidden
-                        },
+                        if (isFloatingTargetVisible) R.string.task_list_target_visible else R.string.task_list_target_hidden,
                     ),
                 ),
             )
+            if (floatingSelectedStepOrder != null && !floatingSelectedStepActionType.isNullOrBlank()) {
+                Text(
+                    text = stringResource(
+                        R.string.task_list_selected_step,
+                        floatingSelectedStepOrder,
+                        stringResource(actionTypeLabelRes(floatingSelectedStepActionType)),
+                    ),
+                )
+            }
             runnerProgress?.let { progress ->
                 Text(text = stringResource(R.string.task_list_runner_task, progress.taskId))
                 Text(text = stringResource(R.string.task_list_runner_round, progress.currentRoundIndex + 1))
@@ -191,19 +208,13 @@ private fun RunnerCard(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            if (isFloatingModeEnabled) {
-                Text(
-                    text = stringResource(R.string.task_list_overlay_control_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.task_list_quick_start_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+            Text(
+                text = stringResource(
+                    if (isFloatingModeEnabled) R.string.task_list_overlay_control_hint else R.string.task_list_quick_start_hint,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
@@ -216,10 +227,11 @@ private fun TaskCard(
     onQuickStart: () -> Unit,
 ) {
     val task = taskWithSteps.task
-    val firstStep = taskWithSteps.steps.firstOrNull()
-    val pointX = firstStep?.x
-    val pointY = firstStep?.y
-    val hasTapPoint = pointX != null && pointY != null
+    val enabledSteps = taskWithSteps.steps.filter { it.enabled }.sortedBy { it.orderIndex }
+    val firstStep = enabledSteps.firstOrNull()
+    val visibleSteps = enabledSteps.filter { ActionType.fromStorage(it.actionType) != ActionType.WAIT }
+    val isMultiPointMode = visibleSteps.size != 1 || visibleSteps.firstOrNull()?.actionTypeEnum() == ActionType.SWIPE
+    val firstStepSummary = buildStepSummary(firstStep)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -235,24 +247,16 @@ private fun TaskCard(
                 text = stringResource(
                     R.string.task_list_task_meta,
                     task.id,
-                    stringResource(
-                        if (task.enabled) {
-                            R.string.task_list_task_enabled
-                        } else {
-                            R.string.task_list_task_disabled
-                        },
-                    ),
+                    stringResource(if (task.enabled) R.string.task_list_task_enabled else R.string.task_list_task_disabled),
                 ),
             )
             Text(
                 text = stringResource(
-                    if (hasTapPoint) {
-                        R.string.task_list_position_set
-                    } else {
-                        R.string.task_list_position_not_set
-                    },
+                    R.string.task_list_task_mode,
+                    stringResource(if (isMultiPointMode) R.string.task_mode_multi_point else R.string.task_mode_single_point),
                 ),
             )
+            Text(text = stringResource(R.string.task_list_step_count, enabledSteps.size))
             Text(
                 text = if (task.infiniteRounds) {
                     stringResource(R.string.task_list_rounds_infinite)
@@ -260,27 +264,14 @@ private fun TaskCard(
                     stringResource(R.string.task_list_rounds_count, task.totalRounds)
                 },
             )
-            Text(
-                text = stringResource(
-                    R.string.task_list_repeat_count,
-                    firstStep?.repeatCount ?: 0,
-                ),
-            )
-            Text(
-                text = stringResource(
-                    R.string.task_list_interval_ms,
-                    (firstStep?.intervalMs ?: 0L).toInt(),
-                ),
-            )
-            if (hasTapPoint) {
-                Text(
-                    text = stringResource(
-                        R.string.task_list_coordinate,
-                        pointX!!,
-                        pointY!!,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            firstStepSummary?.let { summary ->
+                Text(text = summary.title)
+                summary.detail?.let { detail ->
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -303,6 +294,83 @@ private fun TaskCard(
     }
 }
 
+@Composable
+private fun buildStepSummary(
+    step: ActionStepEntity?,
+): StepSummary? {
+    if (step == null) return null
+    return when (step.actionTypeEnum()) {
+        ActionType.TAP -> {
+            val hasPoint = step.x != null && step.y != null
+            StepSummary(
+                title = stringResource(
+                    if (hasPoint) R.string.task_list_position_set else R.string.task_list_position_not_set,
+                ),
+                detail = stringResource(
+                    R.string.task_list_step_brief,
+                    stringResource(R.string.action_type_tap),
+                    step.repeatCount,
+                    step.intervalMs,
+                ) + if (hasPoint) {
+                    " · " + stringResource(R.string.task_list_coordinate, step.x!!, step.y!!)
+                } else {
+                    ""
+                },
+            )
+        }
+
+        ActionType.LONG_PRESS -> {
+            val hasPoint = step.x != null && step.y != null
+            StepSummary(
+                title = stringResource(
+                    if (hasPoint) R.string.task_list_position_set else R.string.task_list_position_not_set,
+                ),
+                detail = stringResource(
+                    R.string.task_list_step_brief_with_duration,
+                    stringResource(R.string.action_type_long_press),
+                    step.repeatCount,
+                    step.intervalMs,
+                    step.durationMs,
+                ) + if (hasPoint) {
+                    " · " + stringResource(R.string.task_list_coordinate, step.x!!, step.y!!)
+                } else {
+                    ""
+                },
+            )
+        }
+
+        ActionType.SWIPE -> {
+            val hasSwipe = step.x != null && step.y != null && step.endX != null && step.endY != null
+            StepSummary(
+                title = stringResource(
+                    if (hasSwipe) R.string.task_list_swipe_set else R.string.task_list_swipe_not_set,
+                ),
+                detail = stringResource(
+                    R.string.task_list_step_brief_with_duration,
+                    stringResource(R.string.action_type_swipe),
+                    step.repeatCount,
+                    step.intervalMs,
+                    step.durationMs,
+                ),
+            )
+        }
+
+        ActionType.WAIT -> StepSummary(
+            title = stringResource(R.string.action_type_wait),
+            detail = stringResource(
+                R.string.task_list_wait_brief,
+                step.durationMs,
+                step.repeatCount,
+            ),
+        )
+    }
+}
+
+private data class StepSummary(
+    val title: String,
+    val detail: String?,
+)
+
 private fun runnerStateRes(
     runnerState: RunnerState,
 ): Int {
@@ -313,5 +381,16 @@ private fun runnerStateRes(
         RunnerState.STOPPING -> R.string.runner_state_stopping
         RunnerState.COMPLETED -> R.string.runner_state_completed
         RunnerState.ERROR -> R.string.runner_state_error
+    }
+}
+
+private fun actionTypeLabelRes(
+    actionTypeValue: String,
+): Int {
+    return when (ActionType.fromStorage(actionTypeValue)) {
+        ActionType.TAP -> R.string.action_type_tap
+        ActionType.LONG_PRESS -> R.string.action_type_long_press
+        ActionType.SWIPE -> R.string.action_type_swipe
+        ActionType.WAIT -> R.string.action_type_wait
     }
 }

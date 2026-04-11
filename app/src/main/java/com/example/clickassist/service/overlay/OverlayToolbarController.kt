@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.StringRes
 import com.example.clickassist.R
+import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.service.runner.RunnerState
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +38,10 @@ import kotlin.math.roundToInt
 data class OverlayToolbarUiState(
     val runnerState: RunnerState,
     val isTargetVisible: Boolean,
+    val isMultiPointMode: Boolean = false,
+    val stepCount: Int = 0,
+    val selectedStepOrder: Int? = null,
+    val selectedStepActionType: String? = null,
     @StringRes
     val statusMessageRes: Int? = null,
 )
@@ -70,6 +75,9 @@ class OverlayToolbarController(
     private var stopButton: TextView? = null
     private var toggleTargetButton: TextView? = null
     private var closeButton: TextView? = null
+    private var modeTextView: TextView? = null
+    private var stepCountTextView: TextView? = null
+    private var selectedStepTextView: TextView? = null
     private var statusTextView: TextView? = null
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
@@ -173,6 +181,9 @@ class OverlayToolbarController(
             stopButton = null
             toggleTargetButton = null
             closeButton = null
+            modeTextView = null
+            stepCountTextView = null
+            selectedStepTextView = null
         }
     }
 
@@ -252,7 +263,7 @@ class OverlayToolbarController(
             ) {
                 Log.i(
                     TAG,
-                    "Debug tap requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                    "Test current step requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
                 )
                 callbacks.onDebugTapRequested()
             }.also { addButton(it) }
@@ -301,6 +312,9 @@ class OverlayToolbarController(
                 callbacks.onCloseRequested()
             }.also { addButton(it) }
 
+            modeTextView = createInfoTextView().also { addInfoView(it) }
+            stepCountTextView = createInfoTextView().also { addInfoView(it) }
+            selectedStepTextView = createInfoTextView().also { addInfoView(it) }
             statusTextView = TextView(appContext).apply {
                 setTextColor(Color.parseColor("#E2E8F0"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
@@ -353,6 +367,26 @@ class OverlayToolbarController(
                 }
             },
         )
+    }
+
+    private fun LinearLayout.addInfoView(view: TextView) {
+        addView(
+            view,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(6)
+            },
+        )
+    }
+
+    private fun createInfoTextView(): TextView {
+        return TextView(appContext).apply {
+            setTextColor(Color.parseColor("#CBD5E1"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setPadding(dp(2), 0, dp(2), 0)
+        }
     }
 
     private fun createActionButton(
@@ -419,6 +453,9 @@ class OverlayToolbarController(
         }
 
         closeButton?.updateEnabledState(enabled = true)
+        renderModeInfo(uiState)
+        renderStepCount(uiState)
+        renderSelectedStep(uiState)
         renderStatusMessage(uiState)
     }
 
@@ -469,6 +506,45 @@ class OverlayToolbarController(
         statusTextView?.text = appContext.getString(statusRes)
     }
 
+    private fun renderModeInfo(
+        uiState: OverlayToolbarUiState,
+    ) {
+        modeTextView?.text = appContext.getString(
+            R.string.overlay_mode_label,
+            appContext.getString(
+                if (uiState.isMultiPointMode) {
+                    R.string.task_mode_multi_point
+                } else {
+                    R.string.task_mode_single_point
+                },
+            ),
+        )
+    }
+
+    private fun renderStepCount(
+        uiState: OverlayToolbarUiState,
+    ) {
+        stepCountTextView?.text = appContext.getString(
+            R.string.overlay_step_count_label,
+            uiState.stepCount,
+        )
+    }
+
+    private fun renderSelectedStep(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val selectedActionType = uiState.selectedStepActionType
+        if (uiState.selectedStepOrder == null || selectedActionType.isNullOrBlank()) {
+            selectedStepTextView?.text = appContext.getString(R.string.overlay_selected_step_empty)
+            return
+        }
+        selectedStepTextView?.text = appContext.getString(
+            R.string.overlay_selected_step_label,
+            uiState.selectedStepOrder,
+            appContext.getString(actionTypeLabelRes(selectedActionType)),
+        )
+    }
+
     @StringRes
     private fun defaultStatusMessageRes(
         runnerState: RunnerState,
@@ -480,6 +556,18 @@ class OverlayToolbarController(
             RunnerState.STOPPING -> R.string.runner_state_stopping
             RunnerState.COMPLETED -> R.string.runner_state_completed
             RunnerState.ERROR -> R.string.runner_state_error
+        }
+    }
+
+    @StringRes
+    private fun actionTypeLabelRes(
+        actionTypeValue: String,
+    ): Int {
+        return when (ActionType.fromStorage(actionTypeValue)) {
+            ActionType.TAP -> R.string.action_type_tap
+            ActionType.LONG_PRESS -> R.string.action_type_long_press
+            ActionType.SWIPE -> R.string.action_type_swipe
+            ActionType.WAIT -> R.string.action_type_wait
         }
     }
 

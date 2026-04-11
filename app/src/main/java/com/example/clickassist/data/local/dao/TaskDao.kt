@@ -41,6 +41,25 @@ abstract class TaskDao {
         y: Int,
     )
 
+    @Query(
+        """
+        UPDATE action_steps
+        SET x = :startX,
+            y = :startY,
+            endX = :endX,
+            endY = :endY
+        WHERE id = :stepId AND taskId = :taskId
+        """,
+    )
+    protected abstract suspend fun updateSwipeStepPositionInternal(
+        taskId: Long,
+        stepId: Long,
+        startX: Int,
+        startY: Int,
+        endX: Int,
+        endY: Int,
+    )
+
     @Query("UPDATE tasks SET updatedAt = :updatedAt WHERE id = :taskId")
     protected abstract suspend fun updateTaskUpdatedAt(
         taskId: Long,
@@ -93,6 +112,29 @@ abstract class TaskDao {
             stepId = stepId,
             x = x,
             y = y,
+        )
+        updateTaskUpdatedAt(
+            taskId = taskId,
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    @Transaction
+    open suspend fun updateSwipeStepPosition(
+        taskId: Long,
+        stepId: Long,
+        startX: Int,
+        startY: Int,
+        endX: Int,
+        endY: Int,
+    ) {
+        updateSwipeStepPositionInternal(
+            taskId = taskId,
+            stepId = stepId,
+            startX = startX,
+            startY = startY,
+            endX = endX,
+            endY = endY,
         )
         updateTaskUpdatedAt(
             taskId = taskId,

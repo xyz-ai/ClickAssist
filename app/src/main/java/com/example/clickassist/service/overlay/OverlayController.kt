@@ -8,8 +8,9 @@ class OverlayController(
     private val targetController: OverlayTargetController,
 ) {
     private var toolbarCallbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
-    private var onPointChangedCallback: ((ScreenPoint) -> Unit)? = null
-    private var onDragEndCallback: ((ScreenPoint) -> Unit)? = null
+    private var onMarkerChangedCallback: ((String, ScreenPoint) -> Unit)? = null
+    private var onMarkerDragEndCallback: ((String, ScreenPoint) -> Unit)? = null
+    private var onMarkerSelectedCallback: ((String) -> Unit)? = null
 
     private var coordinateRecorderCallback: (() -> Unit)? = null
     private var jsonExportCallback: (() -> Unit)? = null
@@ -20,7 +21,9 @@ class OverlayController(
 
     fun isTargetVisible(): Boolean = targetController.isTargetVisible()
 
-    fun currentTargetPoint(): ScreenPoint? = targetController.currentPoint()
+    fun currentMarkerPoints(): Map<String, ScreenPoint> = targetController.currentMarkerPoints()
+
+    fun currentMarkerPoint(markerId: String): ScreenPoint? = targetController.currentMarkerPoint(markerId)
 
     fun resolveInitialPoint(
         preferredX: Int?,
@@ -39,18 +42,20 @@ class OverlayController(
     }
 
     suspend fun showFloatingMode(
-        initialPoint: ScreenPoint,
+        initialMarkers: List<OverlayMarkerModel>,
         targetVisible: Boolean,
         toolbarUiState: OverlayToolbarUiState,
-        onPointChanged: (ScreenPoint) -> Unit,
-        onDragEnd: (ScreenPoint) -> Unit,
+        onMarkerChanged: (String, ScreenPoint) -> Unit,
+        onMarkerDragEnd: (String, ScreenPoint) -> Unit,
+        onMarkerSelected: (String) -> Unit,
     ): Boolean {
         if (!hasPermission()) {
             return false
         }
 
-        onPointChangedCallback = onPointChanged
-        onDragEndCallback = onDragEnd
+        onMarkerChangedCallback = onMarkerChanged
+        onMarkerDragEndCallback = onMarkerDragEnd
+        onMarkerSelectedCallback = onMarkerSelected
 
         val toolbarShown = toolbarController.show(
             uiState = toolbarUiState,
@@ -62,7 +67,7 @@ class OverlayController(
 
         val targetUpdated = setTargetVisibility(
             isVisible = targetVisible,
-            point = initialPoint,
+            markers = initialMarkers,
         )
         if (!targetUpdated) {
             toolbarController.hide()
@@ -80,27 +85,28 @@ class OverlayController(
 
     suspend fun setTargetVisibility(
         isVisible: Boolean,
-        point: ScreenPoint? = targetController.currentPoint(),
+        markers: List<OverlayMarkerModel> = emptyList(),
     ): Boolean {
         if (!isVisible) {
-            targetController.hideTarget(clearPoint = false)
+            targetController.hideTargets(clearPoints = false)
             return true
         }
 
-        val resolvedPoint = point ?: return false
-        val onPointChanged = onPointChangedCallback ?: return false
-        val onDragEnd = onDragEndCallback ?: return false
-        return targetController.showTarget(
-            initialPoint = resolvedPoint,
-            onPointChanged = onPointChanged,
-            onDragEnd = onDragEnd,
+        val onMarkerChanged = onMarkerChangedCallback ?: return false
+        val onMarkerDragEnd = onMarkerDragEndCallback ?: return false
+        val onMarkerSelected = onMarkerSelectedCallback ?: return false
+        return targetController.showMarkers(
+            markers = markers,
+            onMarkerChanged = onMarkerChanged,
+            onMarkerDragEnd = onMarkerDragEnd,
+            onMarkerSelected = onMarkerSelected,
         )
     }
 
-    suspend fun updateTarget(
-        point: ScreenPoint,
+    suspend fun updateTargets(
+        markers: List<OverlayMarkerModel>,
     ): Boolean {
-        return targetController.updateTarget(point)
+        return targetController.updateMarkers(markers)
     }
 
     suspend fun setTargetTouchEnabled(
@@ -113,7 +119,7 @@ class OverlayController(
         clearTargetPoint: Boolean = true,
     ) {
         toolbarController.hide()
-        targetController.hideTarget(clearPoint = clearTargetPoint)
+        targetController.hideTargets(clearPoints = clearTargetPoint)
     }
 
     fun showMessage(
@@ -125,8 +131,9 @@ class OverlayController(
     fun release() {
         toolbarController.release()
         targetController.release()
-        onPointChangedCallback = null
-        onDragEndCallback = null
+        onMarkerChangedCallback = null
+        onMarkerDragEndCallback = null
+        onMarkerSelectedCallback = null
         coordinateRecorderCallback = null
         jsonExportCallback = null
         promoteOtherAppsCallback = null

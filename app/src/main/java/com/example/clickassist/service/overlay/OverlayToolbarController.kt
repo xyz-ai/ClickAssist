@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -19,7 +20,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.annotation.StringRes
 import com.example.clickassist.R
 import com.example.clickassist.domain.repository.SettingsRepository
@@ -37,10 +37,13 @@ import kotlin.math.roundToInt
 data class OverlayToolbarUiState(
     val runnerState: RunnerState,
     val isTargetVisible: Boolean,
+    @StringRes
+    val statusMessageRes: Int? = null,
 )
 
 data class OverlayToolbarCallbacks(
     val onStartRequested: () -> Unit = {},
+    val onDebugTapRequested: () -> Unit = {},
     val onPauseRequested: () -> Unit = {},
     val onStopRequested: () -> Unit = {},
     val onTargetToggleRequested: () -> Unit = {},
@@ -62,12 +65,18 @@ class OverlayToolbarController(
     private var collapsedContainer: TextView? = null
     private var collapseButton: TextView? = null
     private var startButton: TextView? = null
+    private var debugTapButton: TextView? = null
     private var pauseButton: TextView? = null
     private var stopButton: TextView? = null
     private var toggleTargetButton: TextView? = null
     private var closeButton: TextView? = null
+    private var statusTextView: TextView? = null
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
+    private var currentUiState: OverlayToolbarUiState = OverlayToolbarUiState(
+        runnerState = RunnerState.IDLE,
+        isTargetVisible = false,
+    )
     private var isExpanded: Boolean = true
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
@@ -87,6 +96,7 @@ class OverlayToolbarController(
         return withContext(Dispatchers.Main.immediate) {
             this@OverlayToolbarController.callbacks = callbacks
             isExpanded = true
+            currentUiState = uiState
 
             val view = ensureToolbarViewInternal()
             applyUiState(uiState)
@@ -115,6 +125,7 @@ class OverlayToolbarController(
     suspend fun updateState(
         uiState: OverlayToolbarUiState,
     ) = withContext(Dispatchers.Main.immediate) {
+        currentUiState = uiState
         applyUiState(uiState)
         val view = toolbarView ?: return@withContext
         val layoutParams = toolbarLayoutParams ?: return@withContext
@@ -139,7 +150,12 @@ class OverlayToolbarController(
         @StringRes messageRes: Int,
     ) {
         runOnMain {
-            Toast.makeText(appContext, messageRes, Toast.LENGTH_SHORT).show()
+            currentUiState = currentUiState.copy(statusMessageRes = messageRes)
+            renderStatusMessage(currentUiState)
+            Log.i(
+                TAG,
+                "Status message updated: ${appContext.getString(messageRes)}",
+            )
         }
     }
 
@@ -213,6 +229,7 @@ class OverlayToolbarController(
                 labelRes = R.string.overlay_action_collapse,
                 backgroundColor = Color.parseColor("#334155"),
             ) {
+                Log.i(TAG, "Collapse requested from toolbar")
                 isExpanded = false
                 updateExpandedState(refreshLayout = true)
             }.also { addButton(it) }
@@ -221,13 +238,33 @@ class OverlayToolbarController(
                 labelRes = R.string.overlay_action_start,
                 backgroundColor = Color.parseColor("#047857"),
             ) {
+                Log.i(
+                    TAG,
+                    "Start requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
                 callbacks.onStartRequested()
+            }.also { addButton(it) }
+
+            // TODO: debug only
+            debugTapButton = createActionButton(
+                labelRes = R.string.overlay_action_debug_tap,
+                backgroundColor = Color.parseColor("#0F766E"),
+            ) {
+                Log.i(
+                    TAG,
+                    "Debug tap requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
+                callbacks.onDebugTapRequested()
             }.also { addButton(it) }
 
             pauseButton = createActionButton(
                 labelRes = R.string.overlay_action_pause,
                 backgroundColor = Color.parseColor("#B45309"),
             ) {
+                Log.i(
+                    TAG,
+                    "Pause requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
                 callbacks.onPauseRequested()
             }.also { addButton(it) }
 
@@ -235,6 +272,10 @@ class OverlayToolbarController(
                 labelRes = R.string.overlay_action_stop,
                 backgroundColor = Color.parseColor("#B91C1C"),
             ) {
+                Log.i(
+                    TAG,
+                    "Stop requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
                 callbacks.onStopRequested()
             }.also { addButton(it) }
 
@@ -242,6 +283,10 @@ class OverlayToolbarController(
                 labelRes = R.string.overlay_action_hide_target,
                 backgroundColor = Color.parseColor("#1D4ED8"),
             ) {
+                Log.i(
+                    TAG,
+                    "Toggle target requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
                 callbacks.onTargetToggleRequested()
             }.also { addButton(it) }
 
@@ -249,8 +294,27 @@ class OverlayToolbarController(
                 labelRes = R.string.overlay_action_close_floating,
                 backgroundColor = Color.parseColor("#4B5563"),
             ) {
+                Log.i(
+                    TAG,
+                    "Close floating requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
+                )
                 callbacks.onCloseRequested()
             }.also { addButton(it) }
+
+            statusTextView = TextView(appContext).apply {
+                setTextColor(Color.parseColor("#E2E8F0"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                setPadding(dp(4), dp(10), dp(4), dp(2))
+                text = appContext.getString(R.string.overlay_status_ready)
+            }.also { view ->
+                addView(
+                    view,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
         }
     }
 
@@ -334,6 +398,10 @@ class OverlayToolbarController(
             )
         }
 
+        debugTapButton?.updateEnabledState(
+            enabled = uiState.runnerState != RunnerState.RUNNING &&
+                uiState.runnerState != RunnerState.STOPPING,
+        )
         pauseButton?.updateEnabledState(enabled = uiState.runnerState == RunnerState.RUNNING)
         stopButton?.updateEnabledState(
             enabled = uiState.runnerState != RunnerState.IDLE &&
@@ -351,6 +419,7 @@ class OverlayToolbarController(
         }
 
         closeButton?.updateEnabledState(enabled = true)
+        renderStatusMessage(uiState)
     }
 
     private fun TextView.updateLabel(
@@ -391,6 +460,27 @@ class OverlayToolbarController(
             }
         }
         persistCurrentPosition()
+    }
+
+    private fun renderStatusMessage(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val statusRes = uiState.statusMessageRes ?: defaultStatusMessageRes(uiState.runnerState)
+        statusTextView?.text = appContext.getString(statusRes)
+    }
+
+    @StringRes
+    private fun defaultStatusMessageRes(
+        runnerState: RunnerState,
+    ): Int {
+        return when (runnerState) {
+            RunnerState.IDLE -> R.string.overlay_status_ready
+            RunnerState.RUNNING -> R.string.runner_state_running
+            RunnerState.PAUSED -> R.string.runner_state_paused
+            RunnerState.STOPPING -> R.string.runner_state_stopping
+            RunnerState.COMPLETED -> R.string.runner_state_completed
+            RunnerState.ERROR -> R.string.runner_state_error
+        }
     }
 
     private fun moveToolbarBy(
@@ -606,5 +696,9 @@ class OverlayToolbarController(
         private fun hasDraggedEnough(event: MotionEvent): Boolean {
             return abs(event.rawX - downRawX) >= touchSlop || abs(event.rawY - downRawY) >= touchSlop
         }
+    }
+
+    private companion object {
+        const val TAG = "ClickAssistToolbar"
     }
 }

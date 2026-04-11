@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -33,6 +34,7 @@ class OverlayTargetController(
     private var dragTouchOffsetY = 0f
     private var onPointChangedCallback: ((ScreenPoint) -> Unit)? = null
     private var onDragEndCallback: ((ScreenPoint) -> Unit)? = null
+    private var isTouchEnabled: Boolean = true
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
@@ -75,12 +77,14 @@ class OverlayTargetController(
         val layoutParams = (targetLayoutParams ?: createLayoutParams()).also {
             targetLayoutParams = it
         }
+        layoutParams.flags = targetFlags()
 
         applyPointToLayoutParams(
             layoutParams = layoutParams,
             point = clampedPoint,
         )
         currentPoint = clampedPoint
+        Log.i(TAG, "showTarget point=$clampedPoint touchEnabled=$isTouchEnabled")
 
         runCatching {
             if (view.parent == null) {
@@ -105,11 +109,13 @@ class OverlayTargetController(
         val layoutParams = (targetLayoutParams ?: createLayoutParams()).also {
             targetLayoutParams = it
         }
+        layoutParams.flags = targetFlags()
         applyPointToLayoutParams(
             layoutParams = layoutParams,
             point = clampedPoint,
         )
         currentPoint = clampedPoint
+        Log.d(TAG, "updateTarget point=$clampedPoint touchEnabled=$isTouchEnabled")
 
         val view = targetView
         if (view?.parent != null) {
@@ -124,7 +130,26 @@ class OverlayTargetController(
     suspend fun hideTarget(
         clearPoint: Boolean = false,
     ) = withContext(Dispatchers.Main.immediate) {
+        Log.i(TAG, "hideTarget clearPoint=$clearPoint")
         hideTargetInternal(clearPoint = clearPoint)
+    }
+
+    suspend fun setTouchEnabled(
+        enabled: Boolean,
+    ): Boolean = withContext(Dispatchers.Main.immediate) {
+        isTouchEnabled = enabled
+        val layoutParams = targetLayoutParams ?: return@withContext true
+        layoutParams.flags = targetFlags()
+        val view = targetView
+        Log.i(TAG, "setTouchEnabled enabled=$enabled attached=${view?.parent != null}")
+
+        if (view?.parent != null) {
+            runCatching {
+                windowManager.updateViewLayout(view, layoutParams)
+            }.isSuccess
+        } else {
+            true
+        }
     }
 
     fun release() {
@@ -143,8 +168,7 @@ class OverlayTargetController(
             markerSizePx,
             markerSizePx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            targetFlags(),
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -176,6 +200,7 @@ class OverlayTargetController(
             MotionEvent.ACTION_DOWN -> {
                 dragTouchOffsetX = event.x
                 dragTouchOffsetY = event.y
+                Log.d(TAG, "drag start rawX=${event.rawX} rawY=${event.rawY} currentPoint=$currentPoint")
                 true
             }
 
@@ -206,6 +231,7 @@ class OverlayTargetController(
             MotionEvent.ACTION_UP -> {
                 view.performClick()
                 currentPoint?.let { point ->
+                    Log.i(TAG, "drag end point=$point")
                     onDragEndCallback?.invoke(point)
                 }
                 true
@@ -213,6 +239,7 @@ class OverlayTargetController(
 
             MotionEvent.ACTION_CANCEL -> {
                 currentPoint?.let { point ->
+                    Log.i(TAG, "drag cancelled point=$point")
                     onDragEndCallback?.invoke(point)
                 }
                 true
@@ -288,6 +315,15 @@ class OverlayTargetController(
         }
     }
 
+    private fun targetFlags(): Int {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        if (!isTouchEnabled) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        return flags
+    }
+
     private data class ScreenBounds(
         val width: Int,
         val height: Int,
@@ -295,5 +331,6 @@ class OverlayTargetController(
 
     private companion object {
         const val MARKER_SIZE_DP = 56
+        const val TAG = "ClickAssistTarget"
     }
 }

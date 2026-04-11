@@ -7,6 +7,8 @@ sealed interface RunnerError {
 
     data object AccessibilityDisabled : RunnerError
 
+    data object AccessibilityServiceUnavailable : RunnerError
+
     data object TapPointNotSet : RunnerError
 
     data class TapPointOutOfBounds(

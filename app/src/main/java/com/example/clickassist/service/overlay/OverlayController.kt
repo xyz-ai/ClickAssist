@@ -103,6 +103,12 @@ class OverlayController(
         return targetController.updateTarget(point)
     }
 
+    suspend fun setTargetTouchEnabled(
+        enabled: Boolean,
+    ): Boolean {
+        return targetController.setTouchEnabled(enabled)
+    }
+
     suspend fun hideFloatingMode(
         clearTargetPoint: Boolean = true,
     ) {

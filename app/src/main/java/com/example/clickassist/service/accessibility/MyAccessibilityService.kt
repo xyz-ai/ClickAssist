@@ -7,11 +7,14 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Path
 import android.provider.Settings
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 class MyAccessibilityService : AccessibilityService() {
@@ -19,6 +22,7 @@ class MyAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         activeInstance = this
         _serviceConnected.value = true
+        Log.i(TAG, "Accessibility service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -26,11 +30,13 @@ class MyAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: Intent?): Boolean {
+        Log.i(TAG, "Accessibility service unbound")
         clearInstance()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "Accessibility service destroyed")
         clearInstance()
         super.onDestroy()
     }
@@ -41,17 +47,26 @@ class MyAccessibilityService : AccessibilityService() {
         durationMs: Long,
     ): Boolean {
         val safeDuration = durationMs.coerceAtLeast(40L)
-        val gesture = GestureDescription.Builder()
-            .addStroke(
-                GestureDescription.StrokeDescription(
-                    Path().apply { moveTo(x.toFloat(), y.toFloat()) },
-                    0L,
-                    safeDuration,
-                ),
-            )
-            .build()
+        Log.i(TAG, "dispatchTap requested x=$x y=$y durationMs=$safeDuration")
 
-        return dispatchGestureAwait(gesture)
+        return withContext(Dispatchers.Main.immediate) {
+            val gesture = GestureDescription.Builder()
+                .addStroke(
+                    GestureDescription.StrokeDescription(
+                        Path().apply {
+                            moveTo(x.toFloat(), y.toFloat())
+                        },
+                        0L,
+                        safeDuration,
+                    ),
+                )
+                .build()
+
+            dispatchGestureAwait(
+                gesture = gesture,
+                debugLabel = "tap(x=$x,y=$y,durationMs=$safeDuration)",
+            )
+        }
     }
 
     suspend fun dispatchSwipe(
@@ -62,20 +77,30 @@ class MyAccessibilityService : AccessibilityService() {
         durationMs: Long,
     ): Boolean {
         val safeDuration = durationMs.coerceAtLeast(120L)
-        val gesture = GestureDescription.Builder()
-            .addStroke(
-                GestureDescription.StrokeDescription(
-                    Path().apply {
-                        moveTo(startX.toFloat(), startY.toFloat())
-                        lineTo(endX.toFloat(), endY.toFloat())
-                    },
-                    0L,
-                    safeDuration,
-                ),
-            )
-            .build()
+        Log.i(
+            TAG,
+            "dispatchSwipe requested start=($startX,$startY) end=($endX,$endY) durationMs=$safeDuration",
+        )
 
-        return dispatchGestureAwait(gesture)
+        return withContext(Dispatchers.Main.immediate) {
+            val gesture = GestureDescription.Builder()
+                .addStroke(
+                    GestureDescription.StrokeDescription(
+                        Path().apply {
+                            moveTo(startX.toFloat(), startY.toFloat())
+                            lineTo(endX.toFloat(), endY.toFloat())
+                        },
+                        0L,
+                        safeDuration,
+                    ),
+                )
+                .build()
+
+            dispatchGestureAwait(
+                gesture = gesture,
+                debugLabel = "swipe(start=($startX,$startY),end=($endX,$endY),durationMs=$safeDuration)",
+            )
+        }
     }
 
     suspend fun dispatchLongPress(
@@ -102,27 +127,45 @@ class MyAccessibilityService : AccessibilityService() {
 
     private suspend fun dispatchGestureAwait(
         gesture: GestureDescription,
+        debugLabel: String,
     ): Boolean = suspendCancellableCoroutine { continuation ->
-        val dispatched = dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    if (continuation.isActive) {
-                        continuation.resume(true)
+        lastGestureDispatchStatus = GestureDispatchStatus.STARTED
+        try {
+            val dispatched = dispatchGesture(
+                gesture,
+                object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        lastGestureDispatchStatus = GestureDispatchStatus.COMPLETED
+                        Log.i(TAG, "dispatchGesture completed label=$debugLabel")
+                        if (continuation.isActive) {
+                            continuation.resume(true)
+                        }
                     }
-                }
 
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    if (continuation.isActive) {
-                        continuation.resume(false)
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        lastGestureDispatchStatus = GestureDispatchStatus.CANCELLED
+                        Log.w(TAG, "dispatchGesture cancelled label=$debugLabel")
+                        if (continuation.isActive) {
+                            continuation.resume(false)
+                        }
                     }
-                }
-            },
-            null,
-        )
+                },
+                null,
+            )
 
-        if (!dispatched && continuation.isActive) {
-            continuation.resume(false)
+            Log.i(TAG, "dispatchGesture returned=$dispatched label=$debugLabel")
+            if (!dispatched) {
+                lastGestureDispatchStatus = GestureDispatchStatus.REJECTED
+                if (continuation.isActive) {
+                    continuation.resume(false)
+                }
+            }
+        } catch (throwable: Throwable) {
+            lastGestureDispatchStatus = GestureDispatchStatus.ERROR
+            Log.e(TAG, "dispatchGesture threw label=$debugLabel", throwable)
+            if (continuation.isActive) {
+                continuation.resume(false)
+            }
         }
     }
 
@@ -137,10 +180,15 @@ class MyAccessibilityService : AccessibilityService() {
         @Volatile
         private var activeInstance: MyAccessibilityService? = null
 
+        @Volatile
+        private var lastGestureDispatchStatus: GestureDispatchStatus = GestureDispatchStatus.IDLE
+
         private val _serviceConnected = MutableStateFlow(false)
         val serviceConnected: StateFlow<Boolean> = _serviceConnected.asStateFlow()
 
         fun current(): MyAccessibilityService? = activeInstance
+
+        fun lastDispatchStatus(): GestureDispatchStatus = lastGestureDispatchStatus
 
         fun isEnabled(context: Context): Boolean {
             val serviceName = ComponentName(
@@ -159,5 +207,16 @@ class MyAccessibilityService : AccessibilityService() {
                     enabledService.equals(serviceName, ignoreCase = true)
                 }
         }
+
+        private const val TAG = "ClickAssistA11y"
+    }
+
+    enum class GestureDispatchStatus {
+        IDLE,
+        STARTED,
+        COMPLETED,
+        CANCELLED,
+        REJECTED,
+        ERROR,
     }
 }

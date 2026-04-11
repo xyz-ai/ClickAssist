@@ -104,6 +104,7 @@
     <string name="overlay_progress_idle">进度：空闲</string>
     <string name="overlay_progress_detail">进度：任务 %1$d 轮次 %2$d 步骤 %3$d 重复 %4$d</string>
     <string name="overlay_action_start">开始</string>
+    <string name="overlay_action_debug_tap">测试单击</string>
     <string name="overlay_action_resume">继续</string>
     <string name="overlay_action_pause">暂停</string>
     <string name="overlay_action_stop">停止</string>
@@ -112,6 +113,14 @@
     <string name="overlay_action_close_floating">关闭悬浮</string>
     <string name="overlay_action_expand">展开</string>
     <string name="overlay_action_collapse">收起</string>
+    <string name="overlay_status_ready">悬浮模式已就绪</string>
+    <string name="overlay_status_starting">开始执行中</string>
+    <string name="overlay_status_debug_tap_sending">测试单击已发送</string>
+    <string name="overlay_status_tap_completed">点击已完成</string>
+    <string name="overlay_status_tap_cancelled">点击已取消</string>
+    <string name="overlay_status_dispatch_rejected">系统拒绝分发点击</string>
+    <string name="overlay_status_target_visible">点击点已显示</string>
+    <string name="overlay_status_target_hidden">点击点已隐藏</string>
 
     <string name="runner_state_idle">空闲</string>
     <string name="runner_state_running">运行中</string>
@@ -123,6 +132,7 @@
     <string name="error_no_active_task">当前无可执行任务</string>
     <string name="error_overlay_permission_denied">悬浮权限未开启</string>
     <string name="error_accessibility_disabled">无障碍服务未启用</string>
+    <string name="error_accessibility_service_unavailable">无障碍服务未就绪，请重新开启后重试</string>
     <string name="error_tap_point_not_set">当前任务未设置点击位置</string>
     <string name="error_tap_point_out_of_bounds">点击位置超出当前屏幕范围，请重新选择</string>
     <string name="error_no_executable_steps">当前任务无可执行步骤</string>

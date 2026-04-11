@@ -11,6 +11,7 @@ object RunnerErrorMessageMapper {
             RunnerError.NoTaskSelected -> R.string.error_no_active_task
             RunnerError.OverlayPermissionDenied -> R.string.error_overlay_permission_denied
             RunnerError.AccessibilityDisabled -> R.string.error_accessibility_disabled
+            RunnerError.AccessibilityServiceUnavailable -> R.string.error_accessibility_service_unavailable
             RunnerError.TapPointNotSet -> R.string.error_tap_point_not_set
             is RunnerError.TapPointOutOfBounds -> R.string.error_tap_point_out_of_bounds
             RunnerError.NoExecutableSteps -> R.string.error_no_executable_steps

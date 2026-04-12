@@ -1,5 +1,6 @@
 package com.example.clickassist.viewmodel
 
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -52,6 +53,13 @@ enum class CoordinatePickerKind {
     SWIPE_END,
 }
 
+enum class SaveStatus {
+    IDLE,
+    SAVING,
+    SUCCESS,
+    ERROR,
+}
+
 data class TaskEditUiState(
     val taskId: Long = 0L,
     val createdAt: Long = 0L,
@@ -64,6 +72,10 @@ data class TaskEditUiState(
     val coordinatePickerTarget: CoordinatePickerTarget? = null,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
+    val saveStatus: SaveStatus = SaveStatus.IDLE,
+    @StringRes
+    val saveStatusMessageRes: Int? = null,
+    val saveErrorDetail: String? = null,
     @StringRes
     val validationMessageRes: Int? = null,
 ) {
@@ -97,36 +109,34 @@ class TaskEditViewModel(
         }
     }
 
-    fun updateName(value: String) = updateState { copy(name = value, validationMessageRes = null) }
+    fun updateName(value: String) = updateState { clearedFeedback().copy(name = value) }
 
-    fun updateEnabled(value: Boolean) = updateState { copy(enabled = value) }
+    fun updateEnabled(value: Boolean) = updateState { clearedFeedback().copy(enabled = value) }
 
-    fun updateTotalRounds(value: String) = updateState { copy(totalRounds = value, validationMessageRes = null) }
+    fun updateTotalRounds(value: String) = updateState { clearedFeedback().copy(totalRounds = value) }
 
-    fun updateInfiniteRounds(value: Boolean) = updateState { copy(infiniteRounds = value) }
+    fun updateInfiniteRounds(value: Boolean) = updateState { clearedFeedback().copy(infiniteRounds = value) }
 
     fun addStep(actionType: ActionType) {
         val key = nextDraftKey++
         updateState {
-            copy(
+            clearedFeedback().copy(
                 steps = steps + defaultDraft(key, actionType),
                 editingStepKey = key,
-                validationMessageRes = null,
             )
         }
     }
 
-    fun selectStep(draftKey: Long) = updateState { copy(editingStepKey = draftKey) }
+    fun selectStep(draftKey: Long) = updateState { clearedFeedback().copy(editingStepKey = draftKey) }
 
     fun deleteStep(draftKey: Long) {
         updateState {
             val updatedSteps = steps.filterNot { it.draftKey == draftKey }.ifEmpty {
                 listOf(defaultDraft(nextDraftKey++))
             }
-            copy(
+            clearedFeedback().copy(
                 steps = updatedSteps,
                 editingStepKey = updatedSteps.firstOrNull()?.draftKey,
-                validationMessageRes = null,
             )
         }
     }
@@ -158,9 +168,8 @@ class TaskEditViewModel(
     fun updateStepPostDelayMs(draftKey: Long, value: String) = updateDraft(draftKey) { copy(postDelayMs = value) }
 
     fun openCoordinatePicker(draftKey: Long, kind: CoordinatePickerKind) = updateState {
-        copy(
+        clearedFeedback().copy(
             coordinatePickerTarget = CoordinatePickerTarget(draftKey = draftKey, kind = kind),
-            validationMessageRes = null,
         )
     }
 
@@ -182,13 +191,33 @@ class TaskEditViewModel(
 
     fun saveTask() {
         val snapshot = internalState.value
-        if (snapshot.isSaving) return
+        Log.i(
+            TAG,
+            "saveTask requested mode=${if (snapshot.taskId == 0L) "create" else "update"} taskId=${snapshot.taskId} stepCount=${snapshot.steps.size}",
+        )
+        if (snapshot.isSaving) {
+            Log.i(TAG, "saveTask ignored because a save is already in progress")
+            return
+        }
 
-        val totalRounds = snapshot.totalRounds.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        val totalRounds = parsePositiveInt(
+            rawValue = snapshot.totalRounds,
+            validationMessageRes = R.string.validation_numeric_invalid,
+            fieldName = "totalRounds",
+        ) ?: return
         val now = System.currentTimeMillis()
-        val steps = buildActionSteps(snapshot.steps) ?: return
+        val steps = buildActionSteps(
+            drafts = snapshot.steps,
+            currentTaskId = snapshot.taskId,
+        ) ?: return
 
-        updateState { copy(isSaving = true, validationMessageRes = null) }
+        updateState {
+            clearedFeedback().copy(
+                isSaving = true,
+                saveStatus = SaveStatus.SAVING,
+                saveStatusMessageRes = R.string.task_edit_save_status_saving,
+            )
+        }
         viewModelScope.launch {
             try {
                 val task = TaskEntity(
@@ -200,21 +229,38 @@ class TaskEditViewModel(
                     createdAt = if (snapshot.taskId == 0L) now else snapshot.createdAt,
                     updatedAt = now,
                 )
+                Log.i(
+                    TAG,
+                    "saveTask invoking repository mode=${if (snapshot.taskId == 0L) "create" else "update"} taskId=${task.id} stepCount=${steps.size}",
+                )
                 val savedTaskId = taskRepository.saveTask(task, steps)
-                settingsRepository.setLastEditedTaskId(savedTaskId)
+                Log.i(TAG, "saveTask repository success savedTaskId=$savedTaskId stepCount=${steps.size}")
+                runCatching {
+                    settingsRepository.setLastEditedTaskId(savedTaskId)
+                }.onFailure { throwable ->
+                    Log.w(TAG, "saveTask saved task but failed to update lastEditedTaskId savedTaskId=$savedTaskId", throwable)
+                }
                 updateState {
                     copy(
                         taskId = savedTaskId,
                         createdAt = if (createdAt == 0L) now else createdAt,
                         isSaving = false,
+                        saveStatus = SaveStatus.SUCCESS,
+                        saveStatusMessageRes = R.string.task_edit_save_status_success,
+                        saveErrorDetail = null,
                         validationMessageRes = null,
                     )
                 }
                 _savedTaskIds.tryEmit(savedTaskId)
-            } catch (_: Throwable) {
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "saveTask failed taskId=${snapshot.taskId} stepCount=${steps.size}", throwable)
+                val errorDetail = throwable.message?.takeIf { it.isNotBlank() }
                 updateState {
                     copy(
                         isSaving = false,
+                        saveStatus = SaveStatus.ERROR,
+                        saveStatusMessageRes = R.string.task_edit_save_status_failed,
+                        saveErrorDetail = errorDetail,
                         validationMessageRes = R.string.validation_save_task_failed,
                     )
                 }
@@ -224,30 +270,75 @@ class TaskEditViewModel(
 
     private fun buildActionSteps(
         drafts: List<EditableStepDraft>,
+        currentTaskId: Long,
     ): List<ActionStepEntity>? {
+        if (drafts.isEmpty()) {
+            Log.w(TAG, "buildActionSteps failed: no steps")
+            updateState {
+                validationFailed(R.string.validation_steps_required)
+            }
+            return null
+        }
+
         return drafts.mapIndexed { index, draft ->
             val primaryPoint = parseCoordinatePair(draft.x, draft.y, draft.actionType)
-                ?: return null
+            if (primaryPoint == null && hasCoordinateInput(draft.x, draft.y)) {
+                return null
+            }
             val swipeEnd = if (draft.actionType == ActionType.SWIPE) {
-                parseCoordinatePair(draft.endX, draft.endY, draft.actionType, isEnd = true) ?: return null
+                parseCoordinatePair(draft.endX, draft.endY, draft.actionType, isEnd = true).also { endPoint ->
+                    if (endPoint == null && hasCoordinateInput(draft.endX, draft.endY)) {
+                        return null
+                    }
+                }
             } else {
                 null
             }
+            val intervalMs = parsePositiveLong(
+                rawValue = draft.intervalMs,
+                validationMessageRes = R.string.validation_numeric_invalid,
+                fieldName = "intervalMs",
+                draftKey = draft.draftKey,
+            ) ?: return null
+            val durationMs = parsePositiveLong(
+                rawValue = draft.durationMs,
+                validationMessageRes = R.string.validation_numeric_invalid,
+                fieldName = "durationMs",
+                draftKey = draft.draftKey,
+            ) ?: return null
+            val repeatCount = parsePositiveInt(
+                rawValue = draft.repeatCount,
+                validationMessageRes = R.string.validation_numeric_invalid,
+                fieldName = "repeatCount",
+                draftKey = draft.draftKey,
+            ) ?: return null
+            val preDelayMs = parseNonNegativeLong(
+                rawValue = draft.preDelayMs,
+                validationMessageRes = R.string.validation_numeric_invalid,
+                fieldName = "preDelayMs",
+                draftKey = draft.draftKey,
+            ) ?: return null
+            val postDelayMs = parseNonNegativeLong(
+                rawValue = draft.postDelayMs,
+                validationMessageRes = R.string.validation_numeric_invalid,
+                fieldName = "postDelayMs",
+                draftKey = draft.draftKey,
+            ) ?: return null
 
             ActionStepEntity(
                 id = draft.stepId,
-                taskId = taskId,
+                taskId = currentTaskId,
                 orderIndex = index,
                 actionType = draft.actionType.storageValue,
                 x = primaryPoint?.x,
                 y = primaryPoint?.y,
                 endX = swipeEnd?.x,
                 endY = swipeEnd?.y,
-                intervalMs = draft.intervalMs.toLongOrNull()?.coerceAtLeast(0L) ?: 300L,
-                durationMs = draft.durationMs.toLongOrNull()?.coerceAtLeast(1L) ?: defaultDurationFor(draft.actionType),
-                repeatCount = draft.repeatCount.toIntOrNull()?.coerceAtLeast(1) ?: 1,
-                preDelayMs = draft.preDelayMs.toLongOrNull()?.coerceAtLeast(0L) ?: 0L,
-                postDelayMs = draft.postDelayMs.toLongOrNull()?.coerceAtLeast(0L) ?: 0L,
+                intervalMs = intervalMs,
+                durationMs = durationMs,
+                repeatCount = repeatCount,
+                preDelayMs = preDelayMs,
+                postDelayMs = postDelayMs,
                 enabled = draft.enabled,
             )
         }
@@ -272,7 +363,11 @@ class TaskEditViewModel(
                 actionType == ActionType.SWIPE -> R.string.validation_swipe_start_coordinate_invalid
                 else -> R.string.validation_manual_coordinate_invalid
             }
-            updateState { copy(validationMessageRes = messageRes) }
+            updateState { validationFailed(messageRes) }
+            Log.w(
+                TAG,
+                "parseCoordinatePair failed actionType=$actionType isEnd=$isEnd xValue=$trimmedX yValue=$trimmedY",
+            )
             return null
         }
         return ScreenPoint(x, y)
@@ -280,52 +375,74 @@ class TaskEditViewModel(
 
     private fun loadTask() {
         viewModelScope.launch {
-            val taskWithSteps = taskRepository.getTask(taskId)
-            if (taskWithSteps == null) {
+            try {
+                Log.i(TAG, "loadTask start taskId=$taskId")
+                val taskWithSteps = taskRepository.getTask(taskId)
+                if (taskWithSteps == null) {
+                    Log.w(TAG, "loadTask failed taskId=$taskId result=null")
+                    updateState {
+                        copy(
+                            isLoading = false,
+                            saveStatus = SaveStatus.ERROR,
+                            saveStatusMessageRes = R.string.task_edit_load_failed,
+                            saveErrorDetail = null,
+                            validationMessageRes = R.string.validation_task_not_found,
+                        )
+                    }
+                    return@launch
+                }
+                Log.i(
+                    TAG,
+                    "loadTask success taskId=${taskWithSteps.task.id} stepCount=${taskWithSteps.steps.size}",
+                )
+
+                val drafts = taskWithSteps.steps
+                    .sortedBy { it.orderIndex }
+                    .map { step ->
+                        val key = nextDraftKey++
+                        EditableStepDraft(
+                            draftKey = key,
+                            stepId = step.id,
+                            actionType = ActionType.fromStorage(step.actionType),
+                            enabled = step.enabled,
+                            x = step.x?.toString().orEmpty(),
+                            y = step.y?.toString().orEmpty(),
+                            endX = step.endX?.toString().orEmpty(),
+                            endY = step.endY?.toString().orEmpty(),
+                            intervalMs = step.intervalMs.toString(),
+                            durationMs = step.durationMs.toString(),
+                            repeatCount = step.repeatCount.toString(),
+                            preDelayMs = step.preDelayMs.toString(),
+                            postDelayMs = step.postDelayMs.toString(),
+                        )
+                    }
+                    .ifEmpty {
+                        listOf(defaultDraft(nextDraftKey++))
+                    }
+
+                internalState.value = TaskEditUiState(
+                    taskId = taskWithSteps.task.id,
+                    createdAt = taskWithSteps.task.createdAt,
+                    name = taskWithSteps.task.name,
+                    enabled = taskWithSteps.task.enabled,
+                    totalRounds = taskWithSteps.task.totalRounds.toString(),
+                    infiniteRounds = taskWithSteps.task.infiniteRounds,
+                    steps = drafts,
+                    editingStepKey = drafts.firstOrNull()?.draftKey,
+                    isLoading = false,
+                )
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "loadTask exception taskId=$taskId", throwable)
                 updateState {
                     copy(
                         isLoading = false,
+                        saveStatus = SaveStatus.ERROR,
+                        saveStatusMessageRes = R.string.task_edit_load_failed,
+                        saveErrorDetail = throwable.message?.takeIf { it.isNotBlank() },
                         validationMessageRes = R.string.validation_task_not_found,
                     )
                 }
-                return@launch
             }
-
-            val drafts = taskWithSteps.steps
-                .sortedBy { it.orderIndex }
-                .map { step ->
-                    val key = nextDraftKey++
-                    EditableStepDraft(
-                        draftKey = key,
-                        stepId = step.id,
-                        actionType = ActionType.fromStorage(step.actionType),
-                        enabled = step.enabled,
-                        x = step.x?.toString().orEmpty(),
-                        y = step.y?.toString().orEmpty(),
-                        endX = step.endX?.toString().orEmpty(),
-                        endY = step.endY?.toString().orEmpty(),
-                        intervalMs = step.intervalMs.toString(),
-                        durationMs = step.durationMs.toString(),
-                        repeatCount = step.repeatCount.toString(),
-                        preDelayMs = step.preDelayMs.toString(),
-                        postDelayMs = step.postDelayMs.toString(),
-                    )
-                }
-                .ifEmpty {
-                    listOf(defaultDraft(nextDraftKey++))
-                }
-
-            internalState.value = TaskEditUiState(
-                taskId = taskWithSteps.task.id,
-                createdAt = taskWithSteps.task.createdAt,
-                name = taskWithSteps.task.name,
-                enabled = taskWithSteps.task.enabled,
-                totalRounds = taskWithSteps.task.totalRounds.toString(),
-                infiniteRounds = taskWithSteps.task.infiniteRounds,
-                steps = drafts,
-                editingStepKey = drafts.firstOrNull()?.draftKey,
-                isLoading = false,
-            )
         }
     }
 
@@ -341,7 +458,7 @@ class TaskEditViewModel(
             val mutable = steps.toMutableList()
             val step = mutable.removeAt(currentIndex)
             mutable.add(targetIndex, step)
-            copy(steps = mutable, validationMessageRes = null)
+            clearedFeedback().copy(steps = mutable)
         }
     }
 
@@ -350,11 +467,10 @@ class TaskEditViewModel(
         transform: EditableStepDraft.() -> EditableStepDraft,
     ) {
         updateState {
-            copy(
+            clearedFeedback().copy(
                 steps = steps.map { draft ->
                     if (draft.draftKey == draftKey) draft.transform() else draft
                 },
-                validationMessageRes = null,
             )
         }
     }
@@ -363,6 +479,69 @@ class TaskEditViewModel(
         transform: TaskEditUiState.() -> TaskEditUiState,
     ) {
         internalState.value = internalState.value.transform()
+    }
+
+    private fun parsePositiveInt(
+        rawValue: String,
+        @StringRes validationMessageRes: Int,
+        fieldName: String,
+        draftKey: Long? = null,
+    ): Int? {
+        val value = rawValue.trim().toIntOrNull()
+        if (value != null && value > 0) {
+            return value
+        }
+        logNumericValidationFailure(fieldName, rawValue, draftKey)
+        updateState { validationFailed(validationMessageRes) }
+        return null
+    }
+
+    private fun parsePositiveLong(
+        rawValue: String,
+        @StringRes validationMessageRes: Int,
+        fieldName: String,
+        draftKey: Long? = null,
+    ): Long? {
+        val value = rawValue.trim().toLongOrNull()
+        if (value != null && value > 0L) {
+            return value
+        }
+        logNumericValidationFailure(fieldName, rawValue, draftKey)
+        updateState { validationFailed(validationMessageRes) }
+        return null
+    }
+
+    private fun parseNonNegativeLong(
+        rawValue: String,
+        @StringRes validationMessageRes: Int,
+        fieldName: String,
+        draftKey: Long? = null,
+    ): Long? {
+        val value = rawValue.trim().toLongOrNull()
+        if (value != null && value >= 0L) {
+            return value
+        }
+        logNumericValidationFailure(fieldName, rawValue, draftKey)
+        updateState { validationFailed(validationMessageRes) }
+        return null
+    }
+
+    private fun logNumericValidationFailure(
+        fieldName: String,
+        rawValue: String,
+        draftKey: Long?,
+    ) {
+        Log.w(
+            TAG,
+            "numeric validation failed field=$fieldName rawValue=$rawValue draftKey=$draftKey",
+        )
+    }
+
+    private fun hasCoordinateInput(
+        xValue: String,
+        yValue: String,
+    ): Boolean {
+        return xValue.trim().isNotEmpty() || yValue.trim().isNotEmpty()
     }
 
     private fun defaultDraft(
@@ -386,6 +565,8 @@ class TaskEditViewModel(
     }
 
     companion object {
+        private const val TAG = "TaskEditSave"
+
         fun factory(
             appContainer: AppContainer,
             taskId: Long,
@@ -403,4 +584,25 @@ class TaskEditViewModel(
             }
         }
     }
+}
+
+private fun TaskEditUiState.clearedFeedback(): TaskEditUiState {
+    return copy(
+        saveStatus = SaveStatus.IDLE,
+        saveStatusMessageRes = null,
+        saveErrorDetail = null,
+        validationMessageRes = null,
+    )
+}
+
+private fun TaskEditUiState.validationFailed(
+    @StringRes messageRes: Int,
+): TaskEditUiState {
+    return copy(
+        saveStatus = SaveStatus.ERROR,
+        saveStatusMessageRes = R.string.task_edit_save_status_failed,
+        saveErrorDetail = null,
+        validationMessageRes = messageRes,
+        isSaving = false,
+    )
 }

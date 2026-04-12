@@ -1,5 +1,6 @@
 package com.example.clickassist.data.repository
 
+import android.util.Log
 import com.example.clickassist.data.local.dao.TaskDao
 import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskEntity
@@ -31,10 +32,29 @@ class TaskRepositoryImpl(
         task: TaskEntity,
         steps: List<ActionStepEntity>,
     ): Long {
-        return taskDao.upsertTaskWithSteps(
-            task = task,
-            steps = steps.sortedBy { it.orderIndex },
+        val sortedSteps = steps.sortedBy { it.orderIndex }
+        Log.i(
+            TAG,
+            "saveTask start mode=${if (task.id == 0L) "create" else "update"} taskId=${task.id} stepCount=${sortedSteps.size}",
         )
+        return try {
+            taskDao.upsertTaskWithSteps(
+                task = task,
+                steps = sortedSteps,
+            ).also { savedTaskId ->
+                Log.i(TAG, "saveTask success savedTaskId=$savedTaskId stepCount=${sortedSteps.size}")
+            }
+        } catch (throwable: Throwable) {
+            Log.e(
+                TAG,
+                "saveTask failed taskId=${task.id} stepCount=${sortedSteps.size}",
+                throwable,
+            )
+            throw IllegalStateException(
+                throwable.message?.takeIf { it.isNotBlank() } ?: "Failed to save task: unknown error",
+                throwable,
+            )
+        }
     }
 
     override suspend fun updateTapStepPosition(
@@ -80,5 +100,9 @@ class TaskRepositoryImpl(
                     .thenBy { it.id },
             ),
         )
+    }
+
+    private companion object {
+        const val TAG = "TaskRepository"
     }
 }

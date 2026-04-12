@@ -188,4 +188,12 @@
     <string name="validation_swipe_end_coordinate_invalid">滑动终点坐标必须同时填写为整数，或保持为空</string>
     <string name="validation_save_task_failed">保存任务失败</string>
     <string name="validation_task_not_found">任务不存在或步骤数据为空</string>
+    <string name="task_edit_save_status_saving">保存中</string>
+    <string name="task_edit_save_status_success">保存成功</string>
+    <string name="task_edit_save_status_failed">保存失败</string>
+    <string name="task_edit_save_status_failed_with_reason">保存失败：%1$s</string>
+    <string name="task_edit_load_failed">加载任务失败</string>
+    <string name="validation_steps_required">步骤不能为空</string>
+    <string name="validation_numeric_invalid">数值格式不正确</string>
+    <string name="task_list_save_result_refreshed">任务保存结果已刷新</string>
 </resources>

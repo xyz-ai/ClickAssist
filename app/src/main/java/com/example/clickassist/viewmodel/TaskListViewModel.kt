@@ -1,9 +1,11 @@
 package com.example.clickassist.viewmodel
 
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.clickassist.R
 import com.example.clickassist.app.AppContainer
 import com.example.clickassist.data.local.entity.TaskWithSteps
 import com.example.clickassist.domain.repository.SettingsRepository
@@ -12,6 +14,7 @@ import com.example.clickassist.service.runner.RunnerErrorMessageMapper
 import com.example.clickassist.service.runner.RunnerProgress
 import com.example.clickassist.service.runner.RunnerState
 import com.example.clickassist.service.runner.TaskRunnerEngine
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -33,6 +36,8 @@ data class TaskListUiState(
     val floatingStepCount: Int = 0,
     val floatingSelectedStepOrder: Int? = null,
     val floatingSelectedStepActionType: String? = null,
+    @StringRes
+    val pendingMessageRes: Int? = null,
 )
 
 class TaskListViewModel(
@@ -40,6 +45,9 @@ class TaskListViewModel(
     private val settingsRepository: SettingsRepository,
     private val taskRunnerEngine: TaskRunnerEngine,
 ) : ViewModel() {
+    private val pendingMessageRes = MutableStateFlow<Int?>(null)
+    private val lastSavedTaskId = MutableStateFlow<Long?>(null)
+
     private val baseUiState = combine(
         taskRepository.observeTasks(),
         settingsRepository.settingsFlow,
@@ -47,6 +55,11 @@ class TaskListViewModel(
         taskRunnerEngine.runnerProgress,
         taskRunnerEngine.runnerError,
     ) { tasks, settings, runnerState, runnerProgress, runnerError ->
+        val recentSavedTaskId = lastSavedTaskId.value
+        Log.i(
+            TAG,
+            "list refreshed count=${tasks.size} lastEditedTaskId=${settings.lastEditedTaskId} recentSavedTaskId=$recentSavedTaskId",
+        )
         BaseTaskListState(
             tasks = tasks,
             runnerState = runnerState,
@@ -59,7 +72,8 @@ class TaskListViewModel(
     val uiState: StateFlow<TaskListUiState> = combine(
         baseUiState,
         taskRunnerEngine.overlaySessionState,
-    ) { baseState, overlaySession ->
+        pendingMessageRes,
+    ) { baseState, overlaySession, messageRes ->
         TaskListUiState(
             tasks = baseState.tasks,
             runnerState = baseState.runnerState,
@@ -77,6 +91,7 @@ class TaskListViewModel(
             floatingStepCount = overlaySession.stepCount,
             floatingSelectedStepOrder = overlaySession.selectedStepOrder,
             floatingSelectedStepActionType = overlaySession.selectedStepActionType,
+            pendingMessageRes = messageRes,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -106,7 +121,28 @@ class TaskListViewModel(
         }
     }
 
+    fun onTaskSavedResult(taskId: Long) {
+        Log.i(TAG, "received task save result taskId=$taskId")
+        lastSavedTaskId.value = taskId
+        pendingMessageRes.value = R.string.task_list_save_result_refreshed
+    }
+
+    fun consumePendingMessage() {
+        pendingMessageRes.value = null
+    }
+
+    private data class BaseTaskListState(
+        val tasks: List<TaskWithSteps> = emptyList(),
+        val runnerState: RunnerState = RunnerState.IDLE,
+        val runnerProgress: RunnerProgress? = null,
+        @StringRes
+        val runnerErrorMessageRes: Int? = null,
+        val lastEditedTaskId: Long? = null,
+    )
+
     companion object {
+        private const val TAG = "TaskListRefresh"
+
         fun factory(appContainer: AppContainer): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -120,13 +156,4 @@ class TaskListViewModel(
             }
         }
     }
-
-    private data class BaseTaskListState(
-        val tasks: List<TaskWithSteps> = emptyList(),
-        val runnerState: RunnerState = RunnerState.IDLE,
-        val runnerProgress: RunnerProgress? = null,
-        @StringRes
-        val runnerErrorMessageRes: Int? = null,
-        val lastEditedTaskId: Long? = null,
-    )
 }

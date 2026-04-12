@@ -1,5 +1,6 @@
 package com.example.clickassist.ui.taskedit
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import com.example.clickassist.R
 import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.viewmodel.CoordinatePickerKind
 import com.example.clickassist.viewmodel.EditableStepDraft
+import com.example.clickassist.viewmodel.SaveStatus
 import com.example.clickassist.viewmodel.TaskEditViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,12 +45,20 @@ import com.example.clickassist.viewmodel.TaskEditViewModel
 fun TaskEditScreen(
     viewModel: TaskEditViewModel,
     onNavigateBack: () -> Unit,
+    onTaskSaved: (Long) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val onSaveClick = {
+        Log.i(
+            TAG,
+            "save button clicked mode=${if (uiState.taskId == 0L) "create" else "update"} taskId=${uiState.taskId} stepCount=${uiState.steps.size}",
+        )
+        viewModel.saveTask()
+    }
 
     LaunchedEffect(viewModel) {
-        viewModel.savedTaskIds.collect {
-            onNavigateBack()
+        viewModel.savedTaskIds.collect { savedTaskId ->
+            onTaskSaved(savedTaskId)
         }
     }
 
@@ -69,7 +79,7 @@ fun TaskEditScreen(
                 },
                 actions = {
                     TextButton(
-                        onClick = viewModel::saveTask,
+                        onClick = onSaveClick,
                         enabled = !uiState.isLoading && !uiState.isSaving,
                     ) {
                         Text(text = stringResource(R.string.common_save))
@@ -104,6 +114,13 @@ fun TaskEditScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            TaskSaveStatusSection(
+                saveStatus = uiState.saveStatus,
+                saveStatusMessageRes = uiState.saveStatusMessageRes,
+                saveErrorDetail = uiState.saveErrorDetail,
+                validationMessageRes = uiState.validationMessageRes,
+            )
+
             TaskSettingsSection(
                 name = uiState.name,
                 totalRounds = uiState.totalRounds,
@@ -143,15 +160,8 @@ fun TaskEditScreen(
                 )
             }
 
-            uiState.validationMessageRes?.let { messageRes ->
-                Text(
-                    text = stringResource(messageRes),
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
             Button(
-                onClick = viewModel::saveTask,
+                onClick = onSaveClick,
                 enabled = !uiState.isSaving,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -176,6 +186,46 @@ fun TaskEditScreen(
                 onCancel = viewModel::dismissCoordinatePicker,
                 onConfirm = viewModel::applyCoordinateSelection,
             )
+        }
+    }
+}
+
+@Composable
+private fun TaskSaveStatusSection(
+    saveStatus: SaveStatus,
+    saveStatusMessageRes: Int?,
+    saveErrorDetail: String?,
+    validationMessageRes: Int?,
+) {
+    if (saveStatusMessageRes == null && validationMessageRes == null) {
+        return
+    }
+
+    val isError = saveStatus == SaveStatus.ERROR || validationMessageRes != null
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            saveStatusMessageRes?.let { messageRes ->
+                val messageText = if (saveStatus == SaveStatus.ERROR && !saveErrorDetail.isNullOrBlank()) {
+                    stringResource(R.string.task_edit_save_status_failed_with_reason, saveErrorDetail.orEmpty())
+                } else {
+                    stringResource(messageRes)
+                }
+                Text(
+                    text = messageText,
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            validationMessageRes?.let { messageRes ->
+                Text(
+                    text = stringResource(messageRes),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
@@ -417,3 +467,5 @@ private fun actionTypeLabelRes(
         ActionType.WAIT -> R.string.action_type_wait
     }
 }
+
+private const val TAG = "TaskEditSave"

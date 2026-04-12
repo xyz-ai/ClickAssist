@@ -1,7 +1,9 @@
 package com.example.clickassist.data.local.dao
 
+import android.util.Log
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
@@ -24,14 +26,14 @@ abstract class TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
     abstract suspend fun getTask(taskId: Long): TaskWithSteps?
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     protected abstract suspend fun insertTask(task: TaskEntity): Long
 
     @Update
-    protected abstract suspend fun updateTask(task: TaskEntity)
+    protected abstract suspend fun updateTask(task: TaskEntity): Int
 
-    @Insert
-    protected abstract suspend fun insertActionSteps(steps: List<ActionStepEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    protected abstract suspend fun insertActionSteps(steps: List<ActionStepEntity>): List<Long>
 
     @Query("UPDATE action_steps SET x = :x, y = :y WHERE id = :stepId AND taskId = :taskId")
     protected abstract suspend fun updateTapStepPositionInternal(
@@ -67,7 +69,7 @@ abstract class TaskDao {
     )
 
     @Query("DELETE FROM action_steps WHERE taskId = :taskId")
-    protected abstract suspend fun deleteStepsForTask(taskId: Long)
+    protected abstract suspend fun deleteStepsForTask(taskId: Long): Int
 
     @Query("DELETE FROM tasks WHERE id = :taskId")
     abstract suspend fun deleteTaskById(taskId: Long)
@@ -77,17 +79,32 @@ abstract class TaskDao {
         task: TaskEntity,
         steps: List<ActionStepEntity>,
     ): Long {
+        Log.i(
+            TAG,
+            "upsertTaskWithSteps start mode=${if (task.id == 0L) "create" else "update"} taskId=${task.id} stepCount=${steps.size}",
+        )
+
         val taskId = if (task.id == 0L) {
-            insertTask(task)
+            insertTask(task).also { insertedTaskId ->
+                check(insertedTaskId > 0L) {
+                    "Failed to insert task: invalid task id returned"
+                }
+                Log.i(TAG, "insertTask success taskId=$insertedTaskId")
+            }
         } else {
-            updateTask(task)
+            val updatedRows = updateTask(task)
+            Log.i(TAG, "updateTask result taskId=${task.id} updatedRows=$updatedRows")
+            check(updatedRows == 1) {
+                "Failed to update task: task #${task.id} was not found"
+            }
             task.id
         }
 
-        deleteStepsForTask(taskId)
+        val deletedRows = deleteStepsForTask(taskId)
+        Log.i(TAG, "deleteStepsForTask taskId=$taskId deletedRows=$deletedRows")
 
         if (steps.isNotEmpty()) {
-            insertActionSteps(
+            val insertIds = insertActionSteps(
                 steps.map { step ->
                     step.copy(
                         id = 0L,
@@ -95,8 +112,18 @@ abstract class TaskDao {
                     )
                 },
             )
+            Log.i(
+                TAG,
+                "insertActionSteps taskId=$taskId requested=${steps.size} inserted=${insertIds.size}",
+            )
+            check(insertIds.size == steps.size && insertIds.all { it > 0L }) {
+                "Failed to save steps: inserted step count does not match expected count"
+            }
+        } else {
+            Log.w(TAG, "upsertTaskWithSteps taskId=$taskId with empty steps")
         }
 
+        Log.i(TAG, "upsertTaskWithSteps success taskId=$taskId stepCount=${steps.size}")
         return taskId
     }
 
@@ -140,5 +167,9 @@ abstract class TaskDao {
             taskId = taskId,
             updatedAt = System.currentTimeMillis(),
         )
+    }
+
+    private companion object {
+        const val TAG = "TaskDao"
     }
 }

@@ -1,6 +1,7 @@
 package com.example.clickassist.app.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -15,11 +16,13 @@ import com.example.clickassist.ui.tasklist.TaskListScreen
 import com.example.clickassist.viewmodel.PermissionGuideViewModel
 import com.example.clickassist.viewmodel.TaskEditViewModel
 import com.example.clickassist.viewmodel.TaskListViewModel
+import kotlinx.coroutines.flow.collectLatest
 
 private const val PERMISSION_GUIDE_ROUTE = "permission_guide"
 private const val TASK_LIST_ROUTE = "task_list"
 private const val TASK_EDIT_ROUTE = "task_edit"
 private const val TASK_ID_ARG = "taskId"
+private const val TASK_SAVE_RESULT_KEY = "task_save_result"
 
 private fun taskEditRoute(taskId: Long): String = "$TASK_EDIT_ROUTE/$taskId"
 
@@ -50,10 +53,19 @@ fun AppNavHost(
             )
         }
 
-        composable(route = TASK_LIST_ROUTE) {
+        composable(route = TASK_LIST_ROUTE) { backStackEntry ->
             val viewModel: TaskListViewModel = viewModel(
                 factory = TaskListViewModel.factory(appContainer),
             )
+            val saveResultFlow = backStackEntry.savedStateHandle.getStateFlow<Long?>(TASK_SAVE_RESULT_KEY, null)
+
+            LaunchedEffect(backStackEntry, viewModel) {
+                saveResultFlow.collectLatest { savedTaskId ->
+                    if (savedTaskId == null) return@collectLatest
+                    viewModel.onTaskSavedResult(savedTaskId)
+                    backStackEntry.savedStateHandle.set<Long?>(TASK_SAVE_RESULT_KEY, null)
+                }
+            }
 
             TaskListScreen(
                 viewModel = viewModel,
@@ -82,6 +94,12 @@ fun AppNavHost(
             TaskEditScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
+                onTaskSaved = { savedTaskId ->
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle
+                        ?.set(TASK_SAVE_RESULT_KEY, savedTaskId)
+                    navController.navigateUp()
+                },
             )
         }
     }

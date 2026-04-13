@@ -29,12 +29,11 @@ class OverlayAddStepPanelView(
         )
     }
 
-    fun bind(model: OverlayPanelSpec.AddStep) {
+    fun bind(model: OverlayPanelSpec.AddNode) {
         contentContainer.removeAllViews()
         contentContainer.addView(createButton(R.string.task_edit_add_tap_step) { model.onAddStep(ActionType.TAP) })
         contentContainer.addView(createButton(R.string.task_edit_add_long_press_step) { model.onAddStep(ActionType.LONG_PRESS) }, topMarginParams())
         contentContainer.addView(createButton(R.string.task_edit_add_swipe_step) { model.onAddStep(ActionType.SWIPE) }, topMarginParams())
-        contentContainer.addView(createButton(R.string.task_edit_add_wait_step) { model.onAddStep(ActionType.WAIT) }, topMarginParams())
     }
 
     private fun createButton(

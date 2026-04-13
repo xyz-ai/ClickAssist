@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.View
 import com.example.clickassist.domain.model.ActionType
 import kotlin.math.min
@@ -15,7 +16,6 @@ class TargetMarkerView @JvmOverloads constructor(
     defStyleAttr: Int = 0,
 ) : View(context, attrs, defStyleAttr) {
     private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E53935")
         style = Paint.Style.FILL
     }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -31,7 +31,13 @@ class TargetMarkerView @JvmOverloads constructor(
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
-        textSize = 14f * resources.displayMetrics.scaledDensity
+        setTextSize(
+            TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                14f,
+                resources.displayMetrics,
+            ),
+        )
         isFakeBoldText = true
     }
 
@@ -82,14 +88,11 @@ class TargetMarkerView @JvmOverloads constructor(
         canvas.drawCircle(centerX, centerY, innerRadius, ringPaint)
         canvas.drawLine(centerX - crosshairRadius, centerY, centerX + crosshairRadius, centerY, crosshairPaint)
         canvas.drawLine(centerX, centerY - crosshairRadius, centerX, centerY + crosshairRadius, crosshairPaint)
+
         if (label.isNotEmpty()) {
             val baseline = centerY - ((textPaint.descent() + textPaint.ascent()) / 2f)
             canvas.drawText(label, centerX, baseline, textPaint)
         }
-    }
-
-    override fun performClick(): Boolean {
-        return super.performClick()
     }
 
     private fun resolveOuterColor(
@@ -112,5 +115,9 @@ class TargetMarkerView @JvmOverloads constructor(
             }
             ActionType.WAIT -> Color.parseColor("#4B5563")
         }
+    }
+
+    companion object {
+        const val DEFAULT_SIZE_DP = 56
     }
 }

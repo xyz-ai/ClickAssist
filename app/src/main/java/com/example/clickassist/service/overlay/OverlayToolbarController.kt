@@ -24,6 +24,7 @@ import androidx.annotation.StringRes
 import com.example.clickassist.R
 import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.repository.SettingsRepository
+import com.example.clickassist.service.runner.OverlayPlacementMode
 import com.example.clickassist.service.runner.RunnerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,29 +39,24 @@ import kotlin.math.roundToInt
 data class OverlayToolbarUiState(
     val runnerState: RunnerState,
     val isTargetVisible: Boolean,
-    val isMultiPointMode: Boolean = false,
-    val stepCount: Int = 0,
-    val currentTaskName: String? = null,
+    val activeTaskId: Long? = null,
+    val activeTaskName: String? = null,
     val selectedStepOrder: Int? = null,
     val selectedStepActionType: String? = null,
-    @StringRes
-    val activePanelTitleRes: Int? = null,
+    val canDeleteSelected: Boolean = false,
+    val placementMode: OverlayPlacementMode = OverlayPlacementMode.NONE,
     @StringRes
     val statusMessageRes: Int? = null,
 )
 
 data class OverlayToolbarCallbacks(
     val onStartRequested: () -> Unit = {},
-    val onDebugTapRequested: () -> Unit = {},
     val onPauseRequested: () -> Unit = {},
     val onStopRequested: () -> Unit = {},
+    val onAddNodeRequested: () -> Unit = {},
+    val onDeleteSelectedRequested: () -> Unit = {},
+    val onSettingsRequested: () -> Unit = {},
     val onTargetToggleRequested: () -> Unit = {},
-    val onSchemePanelRequested: () -> Unit = {},
-    val onStepListPanelRequested: () -> Unit = {},
-    val onAddStepPanelRequested: () -> Unit = {},
-    val onLoopPanelRequested: () -> Unit = {},
-    val onCurrentStepPanelRequested: () -> Unit = {},
-    val onCloseRequested: () -> Unit = {},
 )
 
 class OverlayToolbarController(
@@ -74,35 +70,28 @@ class OverlayToolbarController(
 
     private var toolbarView: DragInterceptLayout? = null
     private var toolbarLayoutParams: WindowManager.LayoutParams? = null
-    private var expandedContainer: LinearLayout? = null
-    private var collapsedContainer: TextView? = null
-    private var collapseButton: TextView? = null
+    private var contentContainer: LinearLayout? = null
     private var startButton: TextView? = null
-    private var debugTapButton: TextView? = null
     private var pauseButton: TextView? = null
     private var stopButton: TextView? = null
+    private var addNodeButton: TextView? = null
+    private var deleteButton: TextView? = null
+    private var settingsButton: TextView? = null
     private var toggleTargetButton: TextView? = null
-    private var schemeButton: TextView? = null
-    private var stepsButton: TextView? = null
-    private var addButton: TextView? = null
-    private var loopButton: TextView? = null
-    private var currentStepButton: TextView? = null
-    private var closeButton: TextView? = null
-    private var modeTextView: TextView? = null
-    private var stepCountTextView: TextView? = null
-    private var currentTaskTextView: TextView? = null
-    private var selectedStepTextView: TextView? = null
-    private var panelTextView: TextView? = null
     private var statusTextView: TextView? = null
+    private var boundsCache: Rect? = null
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
-    private var currentUiState: OverlayToolbarUiState = OverlayToolbarUiState(
+    private var callbacksBound: Boolean = false
+    private var currentUiState = OverlayToolbarUiState(
         runnerState = RunnerState.IDLE,
         isTargetVisible = false,
     )
-    private var isExpanded: Boolean = true
+    var onBoundsChanged: ((Rect?) -> Unit)? = null
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
+
+    fun currentBounds(): Rect? = boundsCache?.let(::Rect)
 
     suspend fun show(
         uiState: OverlayToolbarUiState,
@@ -118,13 +107,11 @@ class OverlayToolbarController(
 
         return withContext(Dispatchers.Main.immediate) {
             this@OverlayToolbarController.callbacks = callbacks
-            isExpanded = true
+            callbacksBound = true
             currentUiState = uiState
 
-            val view = ensureToolbarViewInternal()
+            val view = ensureToolbarView()
             applyUiState(uiState)
-            updateExpandedState(refreshLayout = false)
-
             val layoutParams = (toolbarLayoutParams ?: createLayoutParams()).also {
                 toolbarLayoutParams = it
             }
@@ -141,6 +128,14 @@ class OverlayToolbarController(
                 } else {
                     windowManager.updateViewLayout(view, layoutParams)
                 }
+            }.onSuccess {
+                updateBoundsCache()
+                Log.i(
+                    TAG,
+                    "show success taskId=${uiState.activeTaskId} taskName=${uiState.activeTaskName} runnerState=${uiState.runnerState}",
+                )
+            }.onFailure { throwable ->
+                Log.e(TAG, "show failed", throwable)
             }.isSuccess
         }
     }
@@ -161,8 +156,11 @@ class OverlayToolbarController(
         if (view.parent != null) {
             runCatching {
                 windowManager.updateViewLayout(view, layoutParams)
+            }.onFailure { throwable ->
+                Log.e(TAG, "updateState failed", throwable)
             }
         }
+        updateBoundsCache()
     }
 
     suspend fun hide() = withContext(Dispatchers.Main.immediate) {
@@ -174,11 +172,7 @@ class OverlayToolbarController(
     ) {
         runOnMain {
             currentUiState = currentUiState.copy(statusMessageRes = messageRes)
-            renderStatusMessage(currentUiState)
-            Log.i(
-                TAG,
-                "Status message updated: ${appContext.getString(messageRes)}",
-            )
+            renderStatus(currentUiState)
         }
     }
 
@@ -188,30 +182,22 @@ class OverlayToolbarController(
             hideInternal()
             toolbarView = null
             toolbarLayoutParams = null
-            expandedContainer = null
-            collapsedContainer = null
-            collapseButton = null
+            contentContainer = null
             startButton = null
-            debugTapButton = null
             pauseButton = null
             stopButton = null
+            addNodeButton = null
+            deleteButton = null
+            settingsButton = null
             toggleTargetButton = null
-            schemeButton = null
-            stepsButton = null
-            addButton = null
-            loopButton = null
-            currentStepButton = null
-            closeButton = null
-            modeTextView = null
-            stepCountTextView = null
-            currentTaskTextView = null
-            selectedStepTextView = null
-            panelTextView = null
             statusTextView = null
+            callbacksBound = false
+            boundsCache = null
+            onBoundsChanged?.invoke(null)
         }
     }
 
-    private fun ensureToolbarViewInternal(): DragInterceptLayout {
+    private fun ensureToolbarView(): DragInterceptLayout {
         toolbarView?.let { return it }
 
         val root = DragInterceptLayout(appContext).apply {
@@ -219,39 +205,14 @@ class OverlayToolbarController(
             clipToPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             onDragBy = { deltaX, deltaY ->
-                moveToolbarBy(deltaX = deltaX, deltaY = deltaY)
+                moveToolbarBy(deltaX, deltaY)
             }
             onDragEnd = {
                 persistCurrentPosition()
             }
         }
 
-        val expanded = createExpandedContent()
-        val collapsed = createCollapsedContent()
-        expandedContainer = expanded
-        collapsedContainer = collapsed
-
-        root.addView(
-            expanded,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-        root.addView(
-            collapsed,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-
-        toolbarView = root
-        return root
-    }
-
-    private fun createExpandedContent(): LinearLayout {
-        return LinearLayout(appContext).apply {
+        val container = LinearLayout(appContext).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -259,201 +220,194 @@ class OverlayToolbarController(
                 setColor(Color.parseColor("#D90F172A"))
                 cornerRadius = dpFloat(22)
             }
+        }
 
-            collapseButton = createActionButton(
-                labelRes = R.string.overlay_action_collapse,
-                backgroundColor = Color.parseColor("#334155"),
-            ) {
-                Log.i(TAG, "Collapse requested from toolbar")
-                isExpanded = false
-                updateExpandedState(refreshLayout = true)
-            }.also { addButton(it) }
-
-            startButton = createActionButton(
-                labelRes = R.string.overlay_action_start,
-                backgroundColor = Color.parseColor("#047857"),
-            ) {
-                Log.i(
-                    TAG,
-                    "Start requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
+        startButton = createActionButton(
+            labelRes = R.string.overlay_action_start,
+            backgroundColor = Color.parseColor("#047857"),
+        ) {
+            dispatchAction("start", isActionEnabled(startButton)) {
                 callbacks.onStartRequested()
-            }.also { addButton(it) }
+            }
+        }.also { container.addToolbarButton(it) }
 
-            // TODO: debug only
-            debugTapButton = createActionButton(
-                labelRes = R.string.overlay_action_debug_tap,
-                backgroundColor = Color.parseColor("#0F766E"),
-            ) {
-                Log.i(
-                    TAG,
-                    "Test current step requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
-                callbacks.onDebugTapRequested()
-            }.also { addButton(it) }
-
-            pauseButton = createActionButton(
-                labelRes = R.string.overlay_action_pause,
-                backgroundColor = Color.parseColor("#B45309"),
-            ) {
-                Log.i(
-                    TAG,
-                    "Pause requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
+        pauseButton = createActionButton(
+            labelRes = R.string.overlay_action_pause,
+            backgroundColor = Color.parseColor("#B45309"),
+        ) {
+            dispatchAction("pause", isActionEnabled(pauseButton)) {
                 callbacks.onPauseRequested()
-            }.also { addButton(it) }
+            }
+        }.also { container.addToolbarButton(it) }
 
-            stopButton = createActionButton(
-                labelRes = R.string.overlay_action_stop,
-                backgroundColor = Color.parseColor("#B91C1C"),
-            ) {
-                Log.i(
-                    TAG,
-                    "Stop requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
+        stopButton = createActionButton(
+            labelRes = R.string.overlay_action_stop,
+            backgroundColor = Color.parseColor("#B91C1C"),
+        ) {
+            dispatchAction("stop", isActionEnabled(stopButton)) {
                 callbacks.onStopRequested()
-            }.also { addButton(it) }
+            }
+        }.also { container.addToolbarButton(it) }
 
-            toggleTargetButton = createActionButton(
-                labelRes = R.string.overlay_action_hide_target,
-                backgroundColor = Color.parseColor("#1D4ED8"),
+        addNodeButton = createActionButton(
+            labelRes = R.string.overlay_action_add_node,
+            backgroundColor = Color.parseColor("#0F766E"),
+        ) {
+            dispatchAction("addNode", isActionEnabled(addNodeButton)) {
+                callbacks.onAddNodeRequested()
+            }
+        }.also { container.addToolbarButton(it) }
+
+        deleteButton = createActionButton(
+            labelRes = R.string.overlay_action_delete_node,
+            backgroundColor = Color.parseColor("#7C2D12"),
+        ) {
+            dispatchAction("deleteSelectedNode", isActionEnabled(deleteButton)) {
+                callbacks.onDeleteSelectedRequested()
+            }
+        }.also { container.addToolbarButton(it) }
+
+        settingsButton = createActionButton(
+            labelRes = R.string.overlay_action_settings,
+            backgroundColor = Color.parseColor("#1D4ED8"),
+        ) {
+            dispatchAction("settings", isActionEnabled(settingsButton)) {
+                callbacks.onSettingsRequested()
+            }
+        }.also { container.addToolbarButton(it) }
+
+        toggleTargetButton = createActionButton(
+            labelRes = R.string.overlay_action_hide_target,
+            backgroundColor = Color.parseColor("#4F46E5"),
+        ) {
+            dispatchAction(
+                actionName = if (currentUiState.isTargetVisible) "hideTarget" else "showTarget",
+                enabled = isActionEnabled(toggleTargetButton),
             ) {
-                Log.i(
-                    TAG,
-                    "Toggle target requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
                 callbacks.onTargetToggleRequested()
-            }.also { addButton(it) }
-
-            schemeButton = createActionButton(
-                labelRes = R.string.overlay_action_scheme,
-                backgroundColor = Color.parseColor("#2563EB"),
-            ) {
-                Log.i(TAG, "Scheme panel requested")
-                callbacks.onSchemePanelRequested()
-            }.also { addButton(it) }
-
-            stepsButton = createActionButton(
-                labelRes = R.string.overlay_action_steps,
-                backgroundColor = Color.parseColor("#1D4ED8"),
-            ) {
-                Log.i(TAG, "Step list panel requested")
-                callbacks.onStepListPanelRequested()
-            }.also { addButton(it) }
-
-            addButton = createActionButton(
-                labelRes = R.string.overlay_action_add_step,
-                backgroundColor = Color.parseColor("#0F766E"),
-            ) {
-                Log.i(TAG, "Add step panel requested")
-                callbacks.onAddStepPanelRequested()
-            }.also { addButton(it) }
-
-            loopButton = createActionButton(
-                labelRes = R.string.overlay_action_loop_settings,
-                backgroundColor = Color.parseColor("#7C3AED"),
-            ) {
-                Log.i(TAG, "Loop settings panel requested")
-                callbacks.onLoopPanelRequested()
-            }.also { addButton(it) }
-
-            currentStepButton = createActionButton(
-                labelRes = R.string.overlay_action_current_step_settings,
-                backgroundColor = Color.parseColor("#9333EA"),
-            ) {
-                Log.i(TAG, "Current step settings requested")
-                callbacks.onCurrentStepPanelRequested()
-            }.also { addButton(it) }
-
-            closeButton = createActionButton(
-                labelRes = R.string.overlay_action_close_floating,
-                backgroundColor = Color.parseColor("#4B5563"),
-            ) {
-                Log.i(
-                    TAG,
-                    "Close floating requested runnerState=${currentUiState.runnerState} targetVisible=${currentUiState.isTargetVisible}",
-                )
-                callbacks.onCloseRequested()
-            }.also { addButton(it) }
-
-            modeTextView = createInfoTextView().also { addInfoView(it) }
-            stepCountTextView = createInfoTextView().also { addInfoView(it) }
-            currentTaskTextView = createInfoTextView().also { addInfoView(it) }
-            selectedStepTextView = createInfoTextView().also { addInfoView(it) }
-            panelTextView = createInfoTextView().also { addInfoView(it) }
-            statusTextView = TextView(appContext).apply {
-                setTextColor(Color.parseColor("#E2E8F0"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                setPadding(dp(4), dp(10), dp(4), dp(2))
-                text = appContext.getString(R.string.overlay_status_ready)
-            }.also { view ->
-                addView(
-                    view,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
             }
-        }
-    }
+        }.also { container.addToolbarButton(it) }
 
-    private fun createCollapsedContent(): TextView {
-        return TextView(appContext).apply {
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#D90F172A"))
-                cornerRadius = dpFloat(20)
-            }
-            gravity = Gravity.CENTER
-            minWidth = dp(52)
-            minHeight = dp(40)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            text = appContext.getString(R.string.overlay_action_expand)
-            contentDescription = text
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                isExpanded = true
-                updateExpandedState(refreshLayout = true)
-            }
-        }
-    }
-
-    private fun LinearLayout.addButton(button: TextView) {
-        addView(
-            button,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                if (childCount > 0) {
-                    topMargin = dp(6)
-                }
-            },
-        )
-    }
-
-    private fun LinearLayout.addInfoView(view: TextView) {
-        addView(
-            view,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                topMargin = dp(6)
-            },
-        )
-    }
-
-    private fun createInfoTextView(): TextView {
-        return TextView(appContext).apply {
-            setTextColor(Color.parseColor("#CBD5E1"))
+        statusTextView = TextView(appContext).apply {
+            setTextColor(Color.parseColor("#E2E8F0"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            setPadding(dp(2), 0, dp(2), 0)
+            setPadding(dp(6), dp(10), dp(6), dp(2))
+        }.also { view ->
+            container.addView(
+                view,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
         }
+
+        contentContainer = container
+        root.addView(
+            container,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        toolbarView = root
+        return root
     }
+
+    private fun applyUiState(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val startLabel = if (uiState.runnerState == RunnerState.PAUSED) {
+            R.string.overlay_action_resume
+        } else {
+            R.string.overlay_action_start
+        }
+        startButton?.apply {
+            updateLabel(startLabel)
+            updateEnabledState(
+                enabled = uiState.runnerState != RunnerState.RUNNING &&
+                    uiState.runnerState != RunnerState.STOPPING,
+            )
+        }
+        pauseButton?.updateEnabledState(enabled = uiState.runnerState == RunnerState.RUNNING)
+        stopButton?.updateEnabledState(
+            enabled = uiState.runnerState != RunnerState.IDLE &&
+                uiState.runnerState != RunnerState.STOPPING,
+        )
+        addNodeButton?.updateEnabledState(
+            enabled = uiState.runnerState != RunnerState.RUNNING &&
+                uiState.runnerState != RunnerState.STOPPING,
+        )
+        deleteButton?.updateEnabledState(
+            enabled = uiState.canDeleteSelected &&
+                uiState.runnerState != RunnerState.STOPPING,
+        )
+        settingsButton?.updateEnabledState(enabled = uiState.runnerState != RunnerState.STOPPING)
+        toggleTargetButton?.apply {
+            updateLabel(
+                if (uiState.isTargetVisible) {
+                    R.string.overlay_action_hide_target
+                } else {
+                    R.string.overlay_action_show_target
+                },
+            )
+            updateEnabledState(enabled = true)
+        }
+        renderStatus(uiState)
+    }
+
+    private fun renderStatus(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val message = when {
+            uiState.statusMessageRes != null -> appContext.getString(uiState.statusMessageRes)
+            uiState.placementMode != OverlayPlacementMode.NONE -> appContext.getString(uiState.placementMode.messageRes)
+            uiState.selectedStepOrder != null && !uiState.selectedStepActionType.isNullOrBlank() -> appContext.getString(
+                R.string.overlay_selected_step_label,
+                uiState.selectedStepOrder,
+                appContext.getString(actionTypeLabelRes(uiState.selectedStepActionType)),
+            )
+            !uiState.activeTaskName.isNullOrBlank() -> appContext.getString(
+                R.string.overlay_current_task_label,
+                uiState.activeTaskName,
+            )
+            else -> appContext.getString(R.string.overlay_selected_step_empty)
+        }
+        statusTextView?.text = message
+    }
+
+    private fun dispatchAction(
+        actionName: String,
+        enabled: Boolean,
+        callback: () -> Unit,
+    ) {
+        Log.i(
+            TAG,
+            "button clicked action=$actionName enabled=$enabled callbacksBound=$callbacksBound taskId=${currentUiState.activeTaskId} taskName=${currentUiState.activeTaskName} runnerState=${currentUiState.runnerState}",
+        )
+        if (!enabled) {
+            Log.w(ACTION_TAG, "button ignored action=$actionName reason=disabled")
+            return
+        }
+        if (!callbacksBound) {
+            Log.e(ACTION_TAG, "button ignored action=$actionName reason=callbacks_not_bound")
+            showMessage(R.string.overlay_status_toolbar_action_unavailable)
+            return
+        }
+
+        runCatching(callback)
+            .onSuccess {
+                Log.i(ACTION_TAG, "button forwarded action=$actionName")
+            }
+            .onFailure { throwable ->
+                Log.e(ACTION_TAG, "button dispatch failed action=$actionName", throwable)
+                showMessage(R.string.overlay_status_toolbar_action_unavailable)
+            }
+    }
+
+    private fun isActionEnabled(
+        button: TextView?,
+    ): Boolean = button?.isEnabled == true
 
     private fun createActionButton(
         @StringRes labelRes: Int,
@@ -466,7 +420,7 @@ class OverlayToolbarController(
                 cornerRadius = dpFloat(18)
             }
             gravity = Gravity.CENTER
-            minWidth = dp(88)
+            minWidth = dp(92)
             minHeight = dp(40)
             setPadding(dp(14), dp(10), dp(14), dp(10))
             setTextColor(Color.WHITE)
@@ -479,52 +433,18 @@ class OverlayToolbarController(
         }
     }
 
-    private fun applyUiState(
-        uiState: OverlayToolbarUiState,
-    ) {
-        collapseButton?.updateLabel(R.string.overlay_action_collapse)
-        collapsedContainer?.updateLabel(R.string.overlay_action_expand)
-
-        val startLabelRes = if (uiState.runnerState == RunnerState.PAUSED) {
-            R.string.overlay_action_resume
-        } else {
-            R.string.overlay_action_start
-        }
-        startButton?.apply {
-            updateLabel(startLabelRes)
-            updateEnabledState(
-                enabled = uiState.runnerState != RunnerState.RUNNING &&
-                    uiState.runnerState != RunnerState.STOPPING,
-            )
-        }
-
-        debugTapButton?.updateEnabledState(
-            enabled = uiState.runnerState != RunnerState.RUNNING &&
-                uiState.runnerState != RunnerState.STOPPING,
+    private fun LinearLayout.addToolbarButton(button: TextView) {
+        addView(
+            button,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                if (childCount > 0) {
+                    topMargin = dp(6)
+                }
+            },
         )
-        pauseButton?.updateEnabledState(enabled = uiState.runnerState == RunnerState.RUNNING)
-        stopButton?.updateEnabledState(
-            enabled = uiState.runnerState != RunnerState.IDLE &&
-                uiState.runnerState != RunnerState.STOPPING,
-        )
-
-        toggleTargetButton?.apply {
-            val labelRes = if (uiState.isTargetVisible) {
-                R.string.overlay_action_hide_target
-            } else {
-                R.string.overlay_action_show_target
-            }
-            updateLabel(labelRes)
-            updateEnabledState(enabled = true)
-        }
-
-        closeButton?.updateEnabledState(enabled = true)
-        renderModeInfo(uiState)
-        renderStepCount(uiState)
-        renderCurrentTask(uiState)
-        renderSelectedStep(uiState)
-        renderActivePanel(uiState)
-        renderStatusMessage(uiState)
     }
 
     private fun TextView.updateLabel(
@@ -539,114 +459,6 @@ class OverlayToolbarController(
     ) {
         isEnabled = enabled
         alpha = if (enabled) 1f else 0.45f
-    }
-
-    private fun updateExpandedState(
-        refreshLayout: Boolean,
-    ) {
-        expandedContainer?.visibility = if (isExpanded) View.VISIBLE else View.GONE
-        collapsedContainer?.visibility = if (isExpanded) View.GONE else View.VISIBLE
-
-        if (!refreshLayout) {
-            return
-        }
-
-        val view = toolbarView ?: return
-        val layoutParams = toolbarLayoutParams ?: return
-        applyPosition(
-            layoutParams = layoutParams,
-            view = view,
-            desiredX = layoutParams.x,
-            desiredY = layoutParams.y,
-        )
-        if (view.parent != null) {
-            runCatching {
-                windowManager.updateViewLayout(view, layoutParams)
-            }
-        }
-        persistCurrentPosition()
-    }
-
-    private fun renderStatusMessage(
-        uiState: OverlayToolbarUiState,
-    ) {
-        val statusRes = uiState.statusMessageRes ?: defaultStatusMessageRes(uiState.runnerState)
-        statusTextView?.text = appContext.getString(statusRes)
-    }
-
-    private fun renderModeInfo(
-        uiState: OverlayToolbarUiState,
-    ) {
-        modeTextView?.text = appContext.getString(
-            R.string.overlay_mode_label,
-            appContext.getString(
-                if (uiState.isMultiPointMode) {
-                    R.string.task_mode_multi_point
-                } else {
-                    R.string.task_mode_single_point
-                },
-            ),
-        )
-    }
-
-    private fun renderStepCount(
-        uiState: OverlayToolbarUiState,
-    ) {
-        stepCountTextView?.text = appContext.getString(
-            R.string.overlay_step_count_label,
-            uiState.stepCount,
-        )
-    }
-
-    private fun renderCurrentTask(
-        uiState: OverlayToolbarUiState,
-    ) {
-        val taskName = uiState.currentTaskName?.takeIf { it.isNotBlank() }
-            ?: appContext.getString(R.string.task_list_floating_task_fallback)
-        currentTaskTextView?.text = appContext.getString(
-            R.string.overlay_current_task_label,
-            taskName,
-        )
-    }
-
-    private fun renderSelectedStep(
-        uiState: OverlayToolbarUiState,
-    ) {
-        val selectedActionType = uiState.selectedStepActionType
-        if (uiState.selectedStepOrder == null || selectedActionType.isNullOrBlank()) {
-            selectedStepTextView?.text = appContext.getString(R.string.overlay_selected_step_empty)
-            return
-        }
-        selectedStepTextView?.text = appContext.getString(
-            R.string.overlay_selected_step_label,
-            uiState.selectedStepOrder,
-            appContext.getString(actionTypeLabelRes(selectedActionType)),
-        )
-    }
-
-    private fun renderActivePanel(
-        uiState: OverlayToolbarUiState,
-    ) {
-        val label = uiState.activePanelTitleRes?.let(appContext::getString)
-            ?: appContext.getString(R.string.overlay_panel_none)
-        panelTextView?.text = appContext.getString(
-            R.string.overlay_active_panel_label,
-            label,
-        )
-    }
-
-    @StringRes
-    private fun defaultStatusMessageRes(
-        runnerState: RunnerState,
-    ): Int {
-        return when (runnerState) {
-            RunnerState.IDLE -> R.string.overlay_status_ready
-            RunnerState.RUNNING -> R.string.runner_state_running
-            RunnerState.PAUSED -> R.string.runner_state_paused
-            RunnerState.STOPPING -> R.string.runner_state_stopping
-            RunnerState.COMPLETED -> R.string.runner_state_completed
-            RunnerState.ERROR -> R.string.runner_state_error
-        }
     }
 
     @StringRes
@@ -678,6 +490,7 @@ class OverlayToolbarController(
                 windowManager.updateViewLayout(view, layoutParams)
             }
         }
+        updateBoundsCache()
     }
 
     private fun persistCurrentPosition() {
@@ -712,7 +525,7 @@ class OverlayToolbarController(
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
         )
         return ViewSize(
-            width = view.measuredWidth.coerceAtLeast(dp(52)),
+            width = view.measuredWidth.coerceAtLeast(dp(92)),
             height = view.measuredHeight.coerceAtLeast(dp(40)),
         )
     }
@@ -739,6 +552,26 @@ class OverlayToolbarController(
                 windowManager.removeView(view)
             }
         }
+        boundsCache = null
+        onBoundsChanged?.invoke(null)
+    }
+
+    private fun updateBoundsCache() {
+        val view = toolbarView
+        val layoutParams = toolbarLayoutParams
+        if (view == null || layoutParams == null) {
+            boundsCache = null
+            onBoundsChanged?.invoke(null)
+            return
+        }
+        val size = measureViewSize(view)
+        boundsCache = Rect(
+            layoutParams.x,
+            layoutParams.y,
+            layoutParams.x + size.width,
+            layoutParams.y + size.height,
+        )
+        onBoundsChanged?.invoke(boundsCache?.let(::Rect))
     }
 
     private fun defaultToolbarX(): Int = dp(12)
@@ -787,6 +620,11 @@ class OverlayToolbarController(
         val height: Int,
     )
 
+    private companion object {
+        const val TAG = "OverlayToolbar"
+        const val ACTION_TAG = "OverlayAction"
+    }
+
     private class DragInterceptLayout(
         context: Context,
     ) : FrameLayout(context) {
@@ -821,9 +659,7 @@ class OverlayToolbarController(
 
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL,
-                -> {
-                    dragging = false
-                }
+                -> dragging = false
             }
             return super.onInterceptTouchEvent(ev)
         }
@@ -874,9 +710,5 @@ class OverlayToolbarController(
         private fun hasDraggedEnough(event: MotionEvent): Boolean {
             return abs(event.rawX - downRawX) >= touchSlop || abs(event.rawY - downRawY) >= touchSlop
         }
-    }
-
-    private companion object {
-        const val TAG = "ClickAssistToolbar"
     }
 }

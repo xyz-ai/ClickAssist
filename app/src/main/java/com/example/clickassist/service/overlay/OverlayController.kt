@@ -1,14 +1,24 @@
 package com.example.clickassist.service.overlay
 
+import android.graphics.Rect
+import android.util.Log
 import androidx.annotation.StringRes
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.service.runner.OverlayPlacementMode
 
 class OverlayController(
     private val toolbarController: OverlayToolbarController,
     private val targetController: OverlayTargetController,
     private val panelController: OverlayPanelController,
+    private val handleController: OverlayHandleController,
 ) {
     private var toolbarCallbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
+    private var handleExpandCallback: (() -> Unit)? = null
+    private var lastToolbarUiState: OverlayToolbarUiState = OverlayToolbarUiState(
+        runnerState = com.example.clickassist.service.runner.RunnerState.IDLE,
+        isTargetVisible = false,
+    )
+    private var onBackgroundTapCallback: ((ScreenPoint) -> Unit)? = null
     private var onMarkerChangedCallback: ((String, ScreenPoint) -> Unit)? = null
     private var onMarkerDragEndCallback: ((String, ScreenPoint) -> Unit)? = null
     private var onMarkerSelectedCallback: ((String) -> Unit)? = null
@@ -18,10 +28,17 @@ class OverlayController(
     private var promoteOtherAppsCallback: (() -> Unit)? = null
     private var adSlotEntryCallback: (() -> Unit)? = null
 
+    init {
+        toolbarController.onBoundsChanged = { syncTouchExclusionRects() }
+        panelController.onBoundsChanged = { syncTouchExclusionRects() }
+        handleController.onBoundsChanged = { syncTouchExclusionRects() }
+    }
+
     fun hasPermission(): Boolean =
         toolbarController.hasPermission() &&
             targetController.hasPermission() &&
-            panelController.hasPermission()
+            panelController.hasPermission() &&
+            handleController.hasPermission()
 
     fun isTargetVisible(): Boolean = targetController.isTargetVisible()
 
@@ -33,10 +50,7 @@ class OverlayController(
         preferredX: Int?,
         preferredY: Int?,
     ): ScreenPoint {
-        return targetController.resolveInitialPoint(
-            preferredX = preferredX,
-            preferredY = preferredY,
-        )
+        return targetController.resolveInitialPoint(preferredX, preferredY)
     }
 
     fun bindToolbarCallbacks(
@@ -45,10 +59,18 @@ class OverlayController(
         toolbarCallbacks = callbacks
     }
 
+    fun bindHandleExpandCallback(
+        callback: () -> Unit,
+    ) {
+        handleExpandCallback = callback
+    }
+
     suspend fun showFloatingMode(
         initialMarkers: List<OverlayMarkerModel>,
         targetVisible: Boolean,
+        placementMode: OverlayPlacementMode,
         toolbarUiState: OverlayToolbarUiState,
+        onBackgroundTap: (ScreenPoint) -> Unit,
         onMarkerChanged: (String, ScreenPoint) -> Unit,
         onMarkerDragEnd: (String, ScreenPoint) -> Unit,
         onMarkerSelected: (String) -> Unit,
@@ -56,27 +78,37 @@ class OverlayController(
         if (!hasPermission()) {
             return false
         }
+        lastToolbarUiState = toolbarUiState
 
+        onBackgroundTapCallback = onBackgroundTap
         onMarkerChangedCallback = onMarkerChanged
         onMarkerDragEndCallback = onMarkerDragEnd
         onMarkerSelectedCallback = onMarkerSelected
 
+        val layerShown = targetController.showLayer(
+            markers = initialMarkers,
+            areMarkersVisible = targetVisible,
+            placementMode = placementMode,
+            onBackgroundTap = onBackgroundTap,
+            onMarkerChanged = onMarkerChanged,
+            onMarkerDragEnd = onMarkerDragEnd,
+            onMarkerSelected = onMarkerSelected,
+        )
+        if (!layerShown) {
+            return false
+        }
+
+        handleController.hide()
         val toolbarShown = toolbarController.show(
             uiState = toolbarUiState,
             callbacks = toolbarCallbacks,
         )
         if (!toolbarShown) {
+            targetController.hideLayer(clearPoints = false)
             return false
         }
 
-        val targetUpdated = setTargetVisibility(
-            isVisible = targetVisible,
-            markers = initialMarkers,
-        )
-        if (!targetUpdated) {
-            toolbarController.hide()
-            return false
-        }
+        syncTouchExclusionRects()
 
         return true
     }
@@ -84,44 +116,47 @@ class OverlayController(
     suspend fun updateToolbarState(
         uiState: OverlayToolbarUiState,
     ) {
+        lastToolbarUiState = uiState
         toolbarController.updateState(uiState)
+        syncTouchExclusionRects()
     }
 
     suspend fun showPanel(
         spec: OverlayPanelSpec,
         onCloseRequested: () -> Unit,
     ): Boolean {
-        return panelController.showPanel(spec, onCloseRequested)
+        val shown = panelController.showPanel(spec, onCloseRequested)
+        syncTouchExclusionRects()
+        return shown
     }
 
     suspend fun hidePanel() {
         panelController.hidePanel()
+        syncTouchExclusionRects()
+    }
+
+    suspend fun updateTargetLayer(
+        markers: List<OverlayMarkerModel>,
+        isVisible: Boolean,
+        placementMode: OverlayPlacementMode,
+    ): Boolean {
+        return targetController.updateLayer(
+            markers = markers,
+            areMarkersVisible = isVisible,
+            placementMode = placementMode,
+        )
     }
 
     suspend fun setTargetVisibility(
         isVisible: Boolean,
-        markers: List<OverlayMarkerModel> = emptyList(),
     ): Boolean {
-        if (!isVisible) {
-            targetController.hideTargets(clearPoints = false)
-            return true
-        }
-
-        val onMarkerChanged = onMarkerChangedCallback ?: return false
-        val onMarkerDragEnd = onMarkerDragEndCallback ?: return false
-        val onMarkerSelected = onMarkerSelectedCallback ?: return false
-        return targetController.showMarkers(
-            markers = markers,
-            onMarkerChanged = onMarkerChanged,
-            onMarkerDragEnd = onMarkerDragEnd,
-            onMarkerSelected = onMarkerSelected,
-        )
+        return targetController.setMarkerVisibility(isVisible)
     }
 
-    suspend fun updateTargets(
-        markers: List<OverlayMarkerModel>,
+    suspend fun setPlacementMode(
+        placementMode: OverlayPlacementMode,
     ): Boolean {
-        return targetController.updateMarkers(markers)
+        return targetController.setPlacementMode(placementMode)
     }
 
     suspend fun setTargetTouchEnabled(
@@ -135,7 +170,44 @@ class OverlayController(
     ) {
         panelController.hidePanel()
         toolbarController.hide()
-        targetController.hideTargets(clearPoints = clearTargetPoint)
+        handleController.hide()
+        targetController.hideLayer(clearPoints = clearTargetPoint)
+        syncTouchExclusionRects()
+    }
+
+    suspend fun hideToolbarToHandle(): Boolean {
+        Log.i(TAG, "hideToolbarToHandle requested")
+        val anchor = toolbarController.currentBounds()
+        val handleShown = handleController.show(
+            preferredX = anchor?.left,
+            preferredY = anchor?.top,
+            onExpandRequested = {
+                Log.i(TAG, "handle expand clicked")
+                handleExpandCallback?.invoke()
+            },
+        )
+        if (!handleShown) {
+            Log.e(TAG, "hideToolbarToHandle failed reason=handle_not_shown")
+            return false
+        }
+        toolbarController.hide()
+        syncTouchExclusionRects()
+        return true
+    }
+
+    suspend fun showToolbarFromHandle(): Boolean {
+        Log.i(TAG, "showToolbarFromHandle requested")
+        val shown = toolbarController.show(
+            uiState = lastToolbarUiState,
+            callbacks = toolbarCallbacks,
+        )
+        if (!shown) {
+            Log.e(TAG, "showToolbarFromHandle failed reason=toolbar_not_shown")
+            return false
+        }
+        handleController.hide()
+        syncTouchExclusionRects()
+        return true
     }
 
     fun showMessage(
@@ -147,7 +219,9 @@ class OverlayController(
     fun release() {
         panelController.release()
         toolbarController.release()
+        handleController.release()
         targetController.release()
+        onBackgroundTapCallback = null
         onMarkerChangedCallback = null
         onMarkerDragEndCallback = null
         onMarkerSelectedCallback = null
@@ -155,6 +229,20 @@ class OverlayController(
         jsonExportCallback = null
         promoteOtherAppsCallback = null
         adSlotEntryCallback = null
+    }
+
+    private fun syncTouchExclusionRects() {
+        targetController.setTouchExclusionRects(
+            listOfNotNull(
+                toolbarController.currentBounds(),
+                panelController.currentBounds(),
+                handleController.currentBounds(),
+            ).map(::Rect),
+        )
+    }
+
+    private companion object {
+        const val TAG = "OverlayAction"
     }
 
     fun bindFutureHooks(

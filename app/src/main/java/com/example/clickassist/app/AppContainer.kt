@@ -9,6 +9,7 @@ import com.example.clickassist.data.settings.DataStoreSettingsRepository
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.overlay.OverlayController
+import com.example.clickassist.service.overlay.OverlayHandleController
 import com.example.clickassist.service.overlay.OverlayPanelController
 import com.example.clickassist.service.overlay.OverlayTargetController
 import com.example.clickassist.service.overlay.OverlayToolbarController
@@ -67,11 +68,19 @@ class DefaultAppContainer(
         OverlayPanelController(context = appContext)
     }
 
+    private val overlayHandleController: OverlayHandleController by lazy {
+        OverlayHandleController(
+            context = appContext,
+            settingsRepository = settingsRepository,
+        )
+    }
+
     override val overlayController: OverlayController by lazy {
         OverlayController(
             toolbarController = overlayToolbarController,
             targetController = overlayTargetController,
             panelController = overlayPanelController,
+            handleController = overlayHandleController,
         )
     }
 

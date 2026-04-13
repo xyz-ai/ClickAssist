@@ -12,6 +12,7 @@ data class OverlayMarkerModel(
     val point: ScreenPoint,
     val role: OverlayMarkerRole,
     val isSelected: Boolean = false,
+    val connectedMarkerId: String? = null,
 )
 
 enum class OverlayMarkerRole {

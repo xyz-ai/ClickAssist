@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -21,10 +22,8 @@ import android.widget.TextView
 import androidx.annotation.StringRes
 import com.example.clickassist.R
 import com.example.clickassist.ui.overlay.OverlayAddStepPanelView
-import com.example.clickassist.ui.overlay.OverlayLoopSettingsView
 import com.example.clickassist.ui.overlay.OverlaySchemePanelView
 import com.example.clickassist.ui.overlay.OverlayStepEditorView
-import com.example.clickassist.ui.overlay.OverlayStepListView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -42,8 +41,13 @@ class OverlayPanelController(
     private var messageTextView: TextView? = null
     private var contentHost: FrameLayout? = null
     private var onCloseRequested: (() -> Unit)? = null
+    private var boundsCache: Rect? = null
+
+    var onBoundsChanged: ((Rect?) -> Unit)? = null
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
+
+    fun currentBounds(): Rect? = boundsCache?.let(::Rect)
 
     suspend fun showPanel(
         spec: OverlayPanelSpec,
@@ -62,6 +66,10 @@ class OverlayPanelController(
             } else {
                 windowManager.updateViewLayout(view, layoutParams)
             }
+        }.onSuccess {
+            updateBoundsCache()
+        }.onFailure { throwable ->
+            Log.e(TAG, "showPanel failed type=${spec.type}", throwable)
         }.isSuccess
     }
 
@@ -78,6 +86,8 @@ class OverlayPanelController(
             titleTextView = null
             messageTextView = null
             contentHost = null
+            boundsCache = null
+            onBoundsChanged?.invoke(null)
         }
     }
 
@@ -203,10 +213,8 @@ class OverlayPanelController(
         spec: OverlayPanelSpec,
     ): View {
         return when (spec) {
-            is OverlayPanelSpec.Scheme -> OverlaySchemePanelView(appContext).apply { bind(spec) }
-            is OverlayPanelSpec.StepList -> OverlayStepListView(appContext).apply { bind(spec) }
-            is OverlayPanelSpec.AddStep -> OverlayAddStepPanelView(appContext).apply { bind(spec) }
-            is OverlayPanelSpec.LoopSettings -> OverlayLoopSettingsView(appContext).apply { bind(spec) }
+            is OverlayPanelSpec.Settings -> OverlaySchemePanelView(appContext).apply { bind(spec) }
+            is OverlayPanelSpec.AddNode -> OverlayAddStepPanelView(appContext).apply { bind(spec) }
             is OverlayPanelSpec.StepEditor -> OverlayStepEditorView(appContext).apply { bind(spec) }
         }
     }
@@ -231,6 +239,29 @@ class OverlayPanelController(
         if (view.parent != null) {
             runCatching { windowManager.removeView(view) }
         }
+        boundsCache = null
+        onBoundsChanged?.invoke(null)
+    }
+
+    private fun updateBoundsCache() {
+        val view = panelRoot
+        val layoutParams = panelLayoutParams
+        if (view == null || layoutParams == null) {
+            boundsCache = null
+            onBoundsChanged?.invoke(null)
+            return
+        }
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        boundsCache = Rect(
+            layoutParams.x,
+            layoutParams.y,
+            layoutParams.x + view.measuredWidth,
+            layoutParams.y + view.measuredHeight,
+        )
+        onBoundsChanged?.invoke(boundsCache?.let(::Rect))
     }
 
     private fun screenWidth(): Int {
@@ -257,6 +288,10 @@ class OverlayPanelController(
 
     private fun dpFloat(value: Int): Float {
         return value * appContext.resources.displayMetrics.density
+    }
+
+    private companion object {
+        const val TAG = "OverlayToolbar"
     }
 
     private fun runOnMain(block: () -> Unit) {

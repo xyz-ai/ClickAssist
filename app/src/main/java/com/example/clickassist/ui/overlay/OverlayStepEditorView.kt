@@ -98,6 +98,7 @@ class OverlayStepEditorView(
         primaryCoordinateContainer.removeAllViews()
         primaryCoordinateContainer.addView(labeledField(labelForPrimaryX(draft.actionType), xInput))
         primaryCoordinateContainer.addView(labeledField(labelForPrimaryY(draft.actionType), yInput), topMarginParams())
+        primaryCoordinateContainer.visibility = if (draft.actionType == ActionType.WAIT) View.GONE else View.VISIBLE
         contentContainer.addView(primaryCoordinateContainer, topMarginParams())
 
         swipeCoordinateContainer.removeAllViews()
@@ -142,6 +143,18 @@ class OverlayStepEditorView(
             },
             topMarginParams(),
         )
+        model.onDeleteStep?.let { onDelete ->
+            contentContainer.addView(
+                Button(context).apply {
+                    text = context.getString(R.string.common_delete)
+                    isAllCaps = false
+                    setOnClickListener {
+                        onDelete(draft.stepId)
+                    }
+                },
+                topMarginParams(),
+            )
+        }
     }
 
     private fun labeledField(

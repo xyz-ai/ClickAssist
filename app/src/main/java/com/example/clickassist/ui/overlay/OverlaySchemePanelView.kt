@@ -6,15 +6,17 @@ import android.graphics.Typeface
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.example.clickassist.R
+import com.example.clickassist.service.overlay.OverlaySchemeItem
 import com.example.clickassist.service.overlay.OverlayPanelSpec
+import com.example.clickassist.service.overlay.OverlayWaitStepItem
 import kotlin.math.roundToInt
 
 class OverlaySchemePanelView(
@@ -24,9 +26,16 @@ class OverlaySchemePanelView(
         orientation = LinearLayout.VERTICAL
         setPadding(dp(4), dp(4), dp(4), dp(4))
     }
-    private val currentNameInput = createInput()
-    private val saveAsInput = createInput()
-    private val tasksContainer = LinearLayout(context).apply {
+    private val currentNameInput = createTextInput()
+    private val saveAsInput = createTextInput()
+    private val totalRoundsInput = createNumberInput()
+    private val infiniteRoundsCheckBox = CheckBox(context).apply {
+        text = context.getString(R.string.task_edit_label_infinite_rounds)
+    }
+    private val schemesContainer = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+    }
+    private val waitStepsContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
     }
 
@@ -41,48 +50,88 @@ class OverlaySchemePanelView(
         )
     }
 
-    fun bind(model: OverlayPanelSpec.Scheme) {
+    fun bind(model: OverlayPanelSpec.Settings) {
         contentContainer.removeAllViews()
 
         currentNameInput.setText(model.currentTaskName)
         saveAsInput.setText(model.saveAsDefaultName)
+        totalRoundsInput.setText(model.totalRounds)
+        infiniteRoundsCheckBox.isChecked = model.infiniteRounds
 
         contentContainer.addView(sectionTitle(R.string.overlay_panel_current_scheme))
         contentContainer.addView(currentNameInput, matchWidthParams())
+        contentContainer.addView(label(R.string.task_edit_label_total_rounds), topMarginMatchParams())
+        contentContainer.addView(totalRoundsInput, matchWidthParams())
+        contentContainer.addView(infiniteRoundsCheckBox, topMarginMatchParams())
         contentContainer.addView(
             actionButton(R.string.overlay_panel_save_scheme) {
-                model.onSaveCurrent(currentNameInput.text?.toString().orEmpty())
+                model.onSaveCurrent(
+                    currentNameInput.text?.toString().orEmpty(),
+                    totalRoundsInput.text?.toString().orEmpty(),
+                    infiniteRoundsCheckBox.isChecked,
+                )
             },
-            topMarginParams(),
+            topMarginMatchParams(),
         )
 
-        contentContainer.addView(sectionTitle(R.string.overlay_panel_save_as), topMarginParams())
+        contentContainer.addView(sectionTitle(R.string.overlay_panel_scheme_list), topMarginMatchParams())
+        contentContainer.addView(schemesContainer, matchWidthParams())
+        renderSchemes(model.schemes, model)
+
+        contentContainer.addView(sectionTitle(R.string.overlay_panel_save_as), topMarginMatchParams())
         contentContainer.addView(saveAsInput, matchWidthParams())
         contentContainer.addView(
             actionButton(R.string.overlay_panel_save_as) {
-                model.onSaveAs(saveAsInput.text?.toString().orEmpty())
+                model.onSaveAs(
+                    saveAsInput.text?.toString().orEmpty(),
+                    totalRoundsInput.text?.toString().orEmpty(),
+                    infiniteRoundsCheckBox.isChecked,
+                )
             },
-            topMarginParams(),
+            topMarginMatchParams(),
         )
 
-        contentContainer.addView(sectionTitle(R.string.overlay_panel_scheme_list), topMarginParams())
-        contentContainer.addView(tasksContainer, matchWidthParams())
-        renderTaskList(model)
+        contentContainer.addView(sectionTitle(R.string.overlay_panel_wait_steps_title), topMarginMatchParams())
+        contentContainer.addView(waitStepsContainer, matchWidthParams())
+        renderWaitSteps(model.waitSteps, model)
+
+        contentContainer.addView(
+            actionButton(R.string.overlay_action_hide_toolbar) {
+                model.onHideToolbar()
+            },
+            topMarginMatchParams(),
+        )
+
+        contentContainer.addView(
+            actionButton(R.string.overlay_action_close_floating) {
+                model.onCloseFloating()
+            },
+            topMarginMatchParams(),
+        )
     }
 
-    private fun renderTaskList(model: OverlayPanelSpec.Scheme) {
-        tasksContainer.removeAllViews()
-        if (model.tasks.isEmpty()) {
-            tasksContainer.addView(bodyText(R.string.overlay_panel_no_tasks))
+    private fun renderSchemes(
+        schemes: List<OverlaySchemeItem>,
+        model: OverlayPanelSpec.Settings,
+    ) {
+        schemesContainer.removeAllViews()
+        if (schemes.isEmpty()) {
+            schemesContainer.addView(bodyText(R.string.overlay_panel_no_tasks))
             return
         }
 
-        model.tasks.forEach { item ->
-            tasksContainer.addView(
+        schemes.forEach { item ->
+            schemesContainer.addView(
                 LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(12), dp(10), dp(12), dp(10))
-                    setBackgroundColor(if (item.isActive) Color.parseColor("#E0F2FE") else Color.parseColor("#F8FAFC"))
+                    setBackgroundColor(
+                        if (item.isCurrent) {
+                            Color.parseColor("#DBEAFE")
+                        } else {
+                            Color.parseColor("#F8FAFC")
+                        },
+                    )
 
                     addView(
                         TextView(context).apply {
@@ -107,14 +156,107 @@ class OverlaySchemePanelView(
                     )
                     addView(
                         actionButton(
-                            if (item.isActive) R.string.overlay_panel_scheme_current else R.string.overlay_panel_scheme_switch,
+                            if (item.isCurrent) {
+                                R.string.overlay_panel_scheme_selected
+                            } else {
+                                R.string.overlay_panel_scheme_switch
+                            },
                         ) {
-                            if (!item.isActive) {
-                                model.onTaskSelected(item.taskId)
-                            }
+                            model.onSchemeSelected(item.taskId)
                         }.apply {
-                            isEnabled = !item.isActive
-                            alpha = if (item.isActive) 0.5f else 1f
+                            isEnabled = !item.isCurrent
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            topMargin = dp(8)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(8)
+                },
+            )
+        }
+    }
+
+    private fun renderWaitSteps(
+        waitSteps: List<OverlayWaitStepItem>,
+        model: OverlayPanelSpec.Settings,
+    ) {
+        waitStepsContainer.removeAllViews()
+        if (waitSteps.isEmpty()) {
+            waitStepsContainer.addView(bodyText(R.string.overlay_panel_no_wait_steps))
+            return
+        }
+
+        waitSteps.forEach { item ->
+            waitStepsContainer.addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    setBackgroundColor(
+                        if (item.isSelected) {
+                            Color.parseColor("#E0F2FE")
+                        } else {
+                            Color.parseColor("#F8FAFC")
+                        },
+                    )
+
+                    addView(
+                        TextView(context).apply {
+                            setTextColor(Color.parseColor("#0F172A"))
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                            setTypeface(typeface, Typeface.BOLD)
+                            text = context.getString(
+                                R.string.overlay_panel_wait_step_item_title,
+                                item.orderIndex + 1,
+                            )
+                        },
+                    )
+                    addView(
+                        TextView(context).apply {
+                            setTextColor(Color.parseColor("#475569"))
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                            text = context.getString(
+                                if (item.enabled) {
+                                    R.string.common_status_enabled
+                                } else {
+                                    R.string.common_status_disabled
+                                },
+                            )
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            topMargin = dp(4)
+                        },
+                    )
+                    addView(
+                        LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.START
+                            addView(
+                                actionButton(R.string.overlay_panel_step_select) {
+                                    model.onWaitStepSelected(item.stepId)
+                                },
+                            )
+                            addView(
+                                actionButton(R.string.common_delete) {
+                                    model.onDeleteWaitStep(item.stepId)
+                                },
+                                LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ).apply {
+                                    marginStart = dp(8)
+                                },
+                            )
                         },
                         LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -143,6 +285,14 @@ class OverlaySchemePanelView(
         }
     }
 
+    private fun label(labelRes: Int): TextView {
+        return TextView(context).apply {
+            setTextColor(Color.parseColor("#334155"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            text = context.getString(labelRes)
+        }
+    }
+
     private fun bodyText(stringRes: Int): TextView {
         return TextView(context).apply {
             setTextColor(Color.parseColor("#475569"))
@@ -151,7 +301,7 @@ class OverlaySchemePanelView(
         }
     }
 
-    private fun createInput(): EditText {
+    private fun createTextInput(): EditText {
         return EditText(context).apply {
             setTextColor(Color.parseColor("#0F172A"))
             setHintTextColor(Color.parseColor("#94A3B8"))
@@ -159,6 +309,17 @@ class OverlaySchemePanelView(
             setBackgroundColor(Color.parseColor("#FFFFFF"))
             setPadding(dp(12), dp(10), dp(12), dp(10))
             inputType = InputType.TYPE_CLASS_TEXT
+        }
+    }
+
+    private fun createNumberInput(): EditText {
+        return EditText(context).apply {
+            setTextColor(Color.parseColor("#0F172A"))
+            setHintTextColor(Color.parseColor("#94A3B8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = InputType.TYPE_CLASS_NUMBER
         }
     }
 
@@ -183,9 +344,9 @@ class OverlaySchemePanelView(
         }
     }
 
-    private fun topMarginParams(): LinearLayout.LayoutParams {
+    private fun topMarginMatchParams(): LinearLayout.LayoutParams {
         return LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply {
             topMargin = dp(8)

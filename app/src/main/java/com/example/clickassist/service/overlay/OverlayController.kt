@@ -6,6 +6,7 @@ import com.example.clickassist.domain.model.ScreenPoint
 class OverlayController(
     private val toolbarController: OverlayToolbarController,
     private val targetController: OverlayTargetController,
+    private val panelController: OverlayPanelController,
 ) {
     private var toolbarCallbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
     private var onMarkerChangedCallback: ((String, ScreenPoint) -> Unit)? = null
@@ -17,7 +18,10 @@ class OverlayController(
     private var promoteOtherAppsCallback: (() -> Unit)? = null
     private var adSlotEntryCallback: (() -> Unit)? = null
 
-    fun hasPermission(): Boolean = toolbarController.hasPermission() && targetController.hasPermission()
+    fun hasPermission(): Boolean =
+        toolbarController.hasPermission() &&
+            targetController.hasPermission() &&
+            panelController.hasPermission()
 
     fun isTargetVisible(): Boolean = targetController.isTargetVisible()
 
@@ -83,6 +87,17 @@ class OverlayController(
         toolbarController.updateState(uiState)
     }
 
+    suspend fun showPanel(
+        spec: OverlayPanelSpec,
+        onCloseRequested: () -> Unit,
+    ): Boolean {
+        return panelController.showPanel(spec, onCloseRequested)
+    }
+
+    suspend fun hidePanel() {
+        panelController.hidePanel()
+    }
+
     suspend fun setTargetVisibility(
         isVisible: Boolean,
         markers: List<OverlayMarkerModel> = emptyList(),
@@ -118,6 +133,7 @@ class OverlayController(
     suspend fun hideFloatingMode(
         clearTargetPoint: Boolean = true,
     ) {
+        panelController.hidePanel()
         toolbarController.hide()
         targetController.hideTargets(clearPoints = clearTargetPoint)
     }
@@ -129,6 +145,7 @@ class OverlayController(
     }
 
     fun release() {
+        panelController.release()
         toolbarController.release()
         targetController.release()
         onMarkerChangedCallback = null

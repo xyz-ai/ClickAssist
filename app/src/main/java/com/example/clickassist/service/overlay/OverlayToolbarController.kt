@@ -40,8 +40,11 @@ data class OverlayToolbarUiState(
     val isTargetVisible: Boolean,
     val isMultiPointMode: Boolean = false,
     val stepCount: Int = 0,
+    val currentTaskName: String? = null,
     val selectedStepOrder: Int? = null,
     val selectedStepActionType: String? = null,
+    @StringRes
+    val activePanelTitleRes: Int? = null,
     @StringRes
     val statusMessageRes: Int? = null,
 )
@@ -52,6 +55,11 @@ data class OverlayToolbarCallbacks(
     val onPauseRequested: () -> Unit = {},
     val onStopRequested: () -> Unit = {},
     val onTargetToggleRequested: () -> Unit = {},
+    val onSchemePanelRequested: () -> Unit = {},
+    val onStepListPanelRequested: () -> Unit = {},
+    val onAddStepPanelRequested: () -> Unit = {},
+    val onLoopPanelRequested: () -> Unit = {},
+    val onCurrentStepPanelRequested: () -> Unit = {},
     val onCloseRequested: () -> Unit = {},
 )
 
@@ -74,10 +82,17 @@ class OverlayToolbarController(
     private var pauseButton: TextView? = null
     private var stopButton: TextView? = null
     private var toggleTargetButton: TextView? = null
+    private var schemeButton: TextView? = null
+    private var stepsButton: TextView? = null
+    private var addButton: TextView? = null
+    private var loopButton: TextView? = null
+    private var currentStepButton: TextView? = null
     private var closeButton: TextView? = null
     private var modeTextView: TextView? = null
     private var stepCountTextView: TextView? = null
+    private var currentTaskTextView: TextView? = null
     private var selectedStepTextView: TextView? = null
+    private var panelTextView: TextView? = null
     private var statusTextView: TextView? = null
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
@@ -177,13 +192,22 @@ class OverlayToolbarController(
             collapsedContainer = null
             collapseButton = null
             startButton = null
+            debugTapButton = null
             pauseButton = null
             stopButton = null
             toggleTargetButton = null
+            schemeButton = null
+            stepsButton = null
+            addButton = null
+            loopButton = null
+            currentStepButton = null
             closeButton = null
             modeTextView = null
             stepCountTextView = null
+            currentTaskTextView = null
             selectedStepTextView = null
+            panelTextView = null
+            statusTextView = null
         }
     }
 
@@ -301,6 +325,46 @@ class OverlayToolbarController(
                 callbacks.onTargetToggleRequested()
             }.also { addButton(it) }
 
+            schemeButton = createActionButton(
+                labelRes = R.string.overlay_action_scheme,
+                backgroundColor = Color.parseColor("#2563EB"),
+            ) {
+                Log.i(TAG, "Scheme panel requested")
+                callbacks.onSchemePanelRequested()
+            }.also { addButton(it) }
+
+            stepsButton = createActionButton(
+                labelRes = R.string.overlay_action_steps,
+                backgroundColor = Color.parseColor("#1D4ED8"),
+            ) {
+                Log.i(TAG, "Step list panel requested")
+                callbacks.onStepListPanelRequested()
+            }.also { addButton(it) }
+
+            addButton = createActionButton(
+                labelRes = R.string.overlay_action_add_step,
+                backgroundColor = Color.parseColor("#0F766E"),
+            ) {
+                Log.i(TAG, "Add step panel requested")
+                callbacks.onAddStepPanelRequested()
+            }.also { addButton(it) }
+
+            loopButton = createActionButton(
+                labelRes = R.string.overlay_action_loop_settings,
+                backgroundColor = Color.parseColor("#7C3AED"),
+            ) {
+                Log.i(TAG, "Loop settings panel requested")
+                callbacks.onLoopPanelRequested()
+            }.also { addButton(it) }
+
+            currentStepButton = createActionButton(
+                labelRes = R.string.overlay_action_current_step_settings,
+                backgroundColor = Color.parseColor("#9333EA"),
+            ) {
+                Log.i(TAG, "Current step settings requested")
+                callbacks.onCurrentStepPanelRequested()
+            }.also { addButton(it) }
+
             closeButton = createActionButton(
                 labelRes = R.string.overlay_action_close_floating,
                 backgroundColor = Color.parseColor("#4B5563"),
@@ -314,7 +378,9 @@ class OverlayToolbarController(
 
             modeTextView = createInfoTextView().also { addInfoView(it) }
             stepCountTextView = createInfoTextView().also { addInfoView(it) }
+            currentTaskTextView = createInfoTextView().also { addInfoView(it) }
             selectedStepTextView = createInfoTextView().also { addInfoView(it) }
+            panelTextView = createInfoTextView().also { addInfoView(it) }
             statusTextView = TextView(appContext).apply {
                 setTextColor(Color.parseColor("#E2E8F0"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
@@ -455,7 +521,9 @@ class OverlayToolbarController(
         closeButton?.updateEnabledState(enabled = true)
         renderModeInfo(uiState)
         renderStepCount(uiState)
+        renderCurrentTask(uiState)
         renderSelectedStep(uiState)
+        renderActivePanel(uiState)
         renderStatusMessage(uiState)
     }
 
@@ -530,6 +598,17 @@ class OverlayToolbarController(
         )
     }
 
+    private fun renderCurrentTask(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val taskName = uiState.currentTaskName?.takeIf { it.isNotBlank() }
+            ?: appContext.getString(R.string.task_list_floating_task_fallback)
+        currentTaskTextView?.text = appContext.getString(
+            R.string.overlay_current_task_label,
+            taskName,
+        )
+    }
+
     private fun renderSelectedStep(
         uiState: OverlayToolbarUiState,
     ) {
@@ -542,6 +621,17 @@ class OverlayToolbarController(
             R.string.overlay_selected_step_label,
             uiState.selectedStepOrder,
             appContext.getString(actionTypeLabelRes(selectedActionType)),
+        )
+    }
+
+    private fun renderActivePanel(
+        uiState: OverlayToolbarUiState,
+    ) {
+        val label = uiState.activePanelTitleRes?.let(appContext::getString)
+            ?: appContext.getString(R.string.overlay_panel_none)
+        panelTextView?.text = appContext.getString(
+            R.string.overlay_active_panel_label,
+            label,
         )
     }
 

@@ -12,7 +12,12 @@ import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.accessibility.MyAccessibilityService
 import com.example.clickassist.service.overlay.OverlayController
 import com.example.clickassist.service.overlay.OverlayMarkerModel
+import com.example.clickassist.service.overlay.OverlayPanelSpec
+import com.example.clickassist.service.overlay.OverlayPanelType
+import com.example.clickassist.service.overlay.OverlaySchemeOption
+import com.example.clickassist.service.overlay.OverlayStepEditorDraft
 import com.example.clickassist.service.overlay.OverlayMarkerRole
+import com.example.clickassist.service.overlay.OverlayStepListItem
 import com.example.clickassist.service.overlay.OverlayToolbarCallbacks
 import com.example.clickassist.service.overlay.OverlayToolbarUiState
 import kotlinx.coroutines.CancellationException
@@ -26,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
@@ -53,6 +59,8 @@ class TaskRunnerEngine(
     private var runnerJob: Job? = null
     private var activeTaskId: Long? = null
     private var selectedStepId: Long? = null
+    private var activePanelType: OverlayPanelType? = null
+    private var activePanelMessageRes: Int? = null
     private val runtimeStepGeometryMap = ConcurrentHashMap<Long, RuntimeStepGeometry>()
 
     init {
@@ -63,6 +71,11 @@ class TaskRunnerEngine(
                 onPauseRequested = ::pause,
                 onStopRequested = ::stop,
                 onTargetToggleRequested = ::toggleTargetVisibility,
+                onSchemePanelRequested = { togglePanel(OverlayPanelType.SCHEME) },
+                onStepListPanelRequested = { togglePanel(OverlayPanelType.STEP_LIST) },
+                onAddStepPanelRequested = { togglePanel(OverlayPanelType.ADD_STEP) },
+                onLoopPanelRequested = { togglePanel(OverlayPanelType.LOOP_SETTINGS) },
+                onCurrentStepPanelRequested = { togglePanel(OverlayPanelType.STEP_EDITOR) },
                 onCloseRequested = ::exitFloatingMode,
             ),
         )
@@ -101,8 +114,12 @@ class TaskRunnerEngine(
         if (_runnerState.value == RunnerState.PAUSED) {
             Log.i(TAG, "resume requested")
             publishError(null)
-            publishStatusMessage(null)
-            publishState(RunnerState.RUNNING)
+            if (runnerJob == null) {
+                engineScope.launch { startActiveTaskInternal() }
+            } else {
+                publishStatusMessage(null)
+                publishState(RunnerState.RUNNING)
+            }
         }
     }
 
@@ -129,6 +146,10 @@ class TaskRunnerEngine(
         }
     }
 
+    fun closeActivePanel() {
+        engineScope.launch { closeActivePanelInternal() }
+    }
+
     fun release() {
         runnerJob?.cancel()
         clearActiveSessionLocal()
@@ -152,66 +173,30 @@ class TaskRunnerEngine(
 
     private suspend fun enterFloatingModeInternal(taskId: Long) {
         Log.i(TAG, "enterFloatingMode taskId=$taskId")
-        val taskWithSteps = taskRepository.getTask(taskId)
-        if (taskWithSteps == null) {
-            publishError(RunnerError.TaskNotFound(taskId), true)
-            return
-        }
         if (!overlayController.hasPermission()) {
             publishError(RunnerError.OverlayPermissionDenied, true)
-            return
-        }
-        taskStartValidator.validateFloatingMode(taskWithSteps)?.let {
-            publishError(it, true)
             return
         }
 
         stopRunnerJobAndResetState(clearError = true)
         overlayController.hideFloatingMode(clearTargetPoint = true)
         clearActiveSessionLocal()
+        activePanelType = null
+        activePanelMessageRes = null
 
-        val normalizedTask = normalizeTaskForRuntime(taskWithSteps)
-        val selectedStep = resolvePreferredSelectedStep(normalizedTask)
-
-        activeTaskId = normalizedTask.task.id
-        selectedStepId = selectedStep?.id
-
-        val markers = buildMarkerModels(normalizedTask)
-        val targetVisible = markers.isNotEmpty()
-        val shown = overlayController.showFloatingMode(
-            initialMarkers = markers,
-            targetVisible = targetVisible,
-            toolbarUiState = createToolbarUiState(
-                normalizedTask = normalizedTask,
-                targetVisible = targetVisible,
-                statusMessageRes = R.string.overlay_status_ready,
-            ),
-            onMarkerChanged = ::handleMarkerChanged,
-            onMarkerDragEnd = ::handleMarkerDragEnd,
-            onMarkerSelected = ::handleMarkerSelected,
+        val loaded = loadTaskIntoFloatingMode(
+            taskId = taskId,
+            preferredSelectionHint = null,
+            statusMessageRes = R.string.overlay_status_ready,
+            initialTargetVisible = true,
         )
-        if (!shown) {
+        if (loaded == null) {
             clearActiveSessionLocal()
-            publishError(
-                if (!overlayController.hasPermission()) {
-                    RunnerError.OverlayPermissionDenied
-                } else {
-                    RunnerError.Unknown("Unable to show floating overlay")
-                },
-                true,
-            )
+            publishOverlaySessionState(OverlaySessionState())
             return
         }
-
-        persistVisibleStepGeometriesAsync(normalizedTask)
+        persistVisibleStepGeometriesAsync(loaded)
         publishError(null)
-        publishOverlaySessionState(
-            createOverlaySessionState(
-                normalizedTask = normalizedTask,
-                isTargetVisible = targetVisible,
-                statusMessageRes = R.string.overlay_status_ready,
-            ),
-        )
     }
 
     private suspend fun startActiveTaskInternal() {
@@ -251,6 +236,53 @@ class TaskRunnerEngine(
             step = step,
             service = service,
         )
+    }
+
+    private fun togglePanel(
+        panelType: OverlayPanelType,
+    ) {
+        engineScope.launch { togglePanelInternal(panelType) }
+    }
+
+    private suspend fun togglePanelInternal(
+        panelType: OverlayPanelType,
+    ) {
+        if (!_overlaySessionState.value.isFloatingModeEnabled || activeTaskId == null) {
+            publishError(RunnerError.NoTaskSelected, true)
+            return
+        }
+        if (activePanelType == panelType) {
+            closeActivePanelInternal()
+            return
+        }
+        activePanelType = panelType
+        activePanelMessageRes = null
+        syncActivePanel()
+    }
+
+    private suspend fun closeActivePanelInternal() {
+        activePanelType = null
+        activePanelMessageRes = null
+        overlayController.hidePanel()
+        if (!_overlaySessionState.value.isFloatingModeEnabled) {
+            return
+        }
+        val taskId = activeTaskId ?: run {
+            publishOverlaySessionState(_overlaySessionState.value.copy(activePanelType = null))
+            return
+        }
+        val task = taskRepository.getTask(taskId)?.let(::normalizeTaskForRuntime)
+        if (task != null) {
+            publishOverlaySessionState(
+                createOverlaySessionState(
+                    normalizedTask = task,
+                    isTargetVisible = _overlaySessionState.value.isTargetVisible,
+                    statusMessageRes = _overlaySessionState.value.statusMessageRes,
+                ),
+            )
+        } else {
+            publishOverlaySessionState(_overlaySessionState.value.copy(activePanelType = null))
+        }
     }
 
     private fun launchRunner(taskWithSteps: TaskWithSteps) {
@@ -524,9 +556,11 @@ class TaskRunnerEngine(
             persistStepGeometry(markerMeta.stepId)
             val taskId = activeTaskId ?: return@launch
             val task = taskRepository.getTask(taskId) ?: return@launch
+            val normalized = normalizeTaskForRuntime(task)
             if (_overlaySessionState.value.isTargetVisible) {
-                syncOverlayTargets(normalizeTaskForRuntime(task))
+                syncOverlayTargets(normalized)
             }
+            syncActivePanel(normalized)
         }
     }
 
@@ -548,6 +582,7 @@ class TaskRunnerEngine(
                     statusMessageRes = _overlaySessionState.value.statusMessageRes,
                 ),
             )
+            syncActivePanel(normalized)
         }
     }
 
@@ -575,6 +610,7 @@ class TaskRunnerEngine(
             if (session.isTargetVisible) {
                 syncOverlayTargets(normalized)
             }
+            syncActivePanel(normalized)
         }
     }
 
@@ -694,8 +730,10 @@ class TaskRunnerEngine(
         targetVisible: Boolean = _overlaySessionState.value.isTargetVisible,
         isMultiPointMode: Boolean = normalizedTask?.let { determineIsMultiPointMode(it) } ?: _overlaySessionState.value.isMultiPointMode,
         stepCount: Int = normalizedTask?.steps?.count { it.enabled } ?: _overlaySessionState.value.stepCount,
+        currentTaskName: String? = normalizedTask?.task?.name ?: _overlaySessionState.value.activeTaskName,
         selectedStepOrder: Int? = normalizedTask?.let { resolveSelectedStepOrder(it) } ?: _overlaySessionState.value.selectedStepOrder,
         selectedStepActionType: String? = normalizedTask?.let { resolveSelectedStepActionType(it) } ?: _overlaySessionState.value.selectedStepActionType,
+        activePanelTitleRes: Int? = activePanelType?.titleRes ?: _overlaySessionState.value.activePanelType?.titleRes,
         @StringRes statusMessageRes: Int? = _overlaySessionState.value.statusMessageRes,
     ): OverlayToolbarUiState {
         return OverlayToolbarUiState(
@@ -703,8 +741,10 @@ class TaskRunnerEngine(
             isTargetVisible = targetVisible,
             isMultiPointMode = isMultiPointMode,
             stepCount = stepCount,
+            currentTaskName = currentTaskName,
             selectedStepOrder = selectedStepOrder,
             selectedStepActionType = selectedStepActionType,
+            activePanelTitleRes = activePanelTitleRes,
             statusMessageRes = statusMessageRes,
         )
     }
@@ -717,11 +757,13 @@ class TaskRunnerEngine(
         return OverlaySessionState(
             isFloatingModeEnabled = true,
             activeTaskId = normalizedTask.task.id,
+            activeTaskName = normalizedTask.task.name,
             isTargetVisible = isTargetVisible,
             isMultiPointMode = determineIsMultiPointMode(normalizedTask),
             stepCount = normalizedTask.steps.count { it.enabled },
             selectedStepOrder = resolveSelectedStepOrder(normalizedTask),
             selectedStepActionType = resolveSelectedStepActionType(normalizedTask),
+            activePanelType = activePanelType,
             statusMessageRes = statusMessageRes,
         )
     }
@@ -1023,6 +1065,670 @@ class TaskRunnerEngine(
         }
     }
 
+    private suspend fun loadTaskIntoFloatingMode(
+        taskId: Long,
+        preferredSelectionHint: StepSelectionHint?,
+        @StringRes statusMessageRes: Int?,
+        initialTargetVisible: Boolean?,
+    ): TaskWithSteps? {
+        val taskWithSteps = taskRepository.getTask(taskId) ?: run {
+            publishError(RunnerError.TaskNotFound(taskId), true)
+            return null
+        }
+        val normalizedTask = normalizeTaskForRuntime(taskWithSteps)
+        selectedStepId = resolveSelectedStepId(normalizedTask, preferredSelectionHint)
+        activeTaskId = normalizedTask.task.id
+
+        val markers = buildMarkerModels(normalizedTask)
+        val targetVisible = when (initialTargetVisible) {
+            null -> _overlaySessionState.value.isTargetVisible && markers.isNotEmpty()
+            else -> initialTargetVisible && markers.isNotEmpty()
+        }
+
+        val shown = if (!_overlaySessionState.value.isFloatingModeEnabled) {
+            overlayController.showFloatingMode(
+                initialMarkers = markers,
+                targetVisible = targetVisible,
+                toolbarUiState = createToolbarUiState(
+                    normalizedTask = normalizedTask,
+                    targetVisible = targetVisible,
+                    statusMessageRes = statusMessageRes,
+                ),
+                onMarkerChanged = ::handleMarkerChanged,
+                onMarkerDragEnd = ::handleMarkerDragEnd,
+                onMarkerSelected = ::handleMarkerSelected,
+            )
+        } else {
+            overlayController.updateToolbarState(
+                createToolbarUiState(
+                    normalizedTask = normalizedTask,
+                    targetVisible = targetVisible,
+                    statusMessageRes = statusMessageRes,
+                ),
+            )
+            overlayController.setTargetVisibility(
+                isVisible = targetVisible,
+                markers = markers,
+            )
+        }
+
+        if (!shown) {
+            publishError(
+                if (!overlayController.hasPermission()) {
+                    RunnerError.OverlayPermissionDenied
+                } else {
+                    RunnerError.Unknown("Unable to show floating overlay")
+                },
+                true,
+            )
+            return null
+        }
+
+        publishOverlaySessionState(
+            createOverlaySessionState(
+                normalizedTask = normalizedTask,
+                isTargetVisible = targetVisible,
+                statusMessageRes = statusMessageRes,
+            ),
+        )
+        syncActivePanel(normalizedTask)
+        return normalizedTask
+    }
+
+    private suspend fun syncActivePanel(
+        taskWithSteps: TaskWithSteps? = null,
+    ) {
+        val panelType = activePanelType
+        if (!_overlaySessionState.value.isFloatingModeEnabled || panelType == null) {
+            overlayController.hidePanel()
+            return
+        }
+
+        val taskId = activeTaskId ?: run {
+            overlayController.hidePanel()
+            return
+        }
+        val normalizedTask = taskWithSteps ?: taskRepository.getTask(taskId)?.let(::normalizeTaskForRuntime) ?: run {
+            overlayController.hidePanel()
+            return
+        }
+        val spec = buildPanelSpec(normalizedTask) ?: run {
+            overlayController.hidePanel()
+            return
+        }
+        val shown = overlayController.showPanel(
+            spec = spec,
+            onCloseRequested = ::closeActivePanel,
+        )
+        if (!shown) {
+            publishError(RunnerError.OverlayPermissionDenied, true)
+        }
+    }
+
+    private suspend fun buildPanelSpec(
+        taskWithSteps: TaskWithSteps,
+    ): OverlayPanelSpec? {
+        return when (activePanelType) {
+            OverlayPanelType.SCHEME -> {
+                val tasks = taskRepository.observeTasks()
+                    .first()
+                    .sortedByDescending { it.task.updatedAt }
+                    .map { item ->
+                        OverlaySchemeOption(
+                            taskId = item.task.id,
+                            name = item.task.name,
+                            stepCount = item.steps.size,
+                            isActive = item.task.id == taskWithSteps.task.id,
+                        )
+                    }
+                OverlayPanelSpec.Scheme(
+                    currentTaskName = taskWithSteps.task.name,
+                    saveAsDefaultName = appContext.getString(
+                        R.string.overlay_panel_save_as_default_name,
+                        taskWithSteps.task.name,
+                    ),
+                    tasks = tasks,
+                    messageRes = activePanelMessageRes,
+                    onTaskSelected = { taskId -> engineScope.launch { switchTaskScheme(taskId) } },
+                    onSaveCurrent = { name -> engineScope.launch { saveCurrentScheme(name) } },
+                    onSaveAs = { name -> engineScope.launch { saveAsNewScheme(taskWithSteps, name) } },
+                )
+            }
+
+            OverlayPanelType.STEP_LIST -> {
+                val steps = taskWithSteps.steps.sortedBy { it.orderIndex }
+                OverlayPanelSpec.StepList(
+                    items = steps.mapIndexed { index, step ->
+                        OverlayStepListItem(
+                            stepId = step.id,
+                            orderIndex = index,
+                            actionType = step.actionTypeEnum(),
+                            enabled = step.enabled,
+                            isSelected = step.id == selectedStepId,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < steps.lastIndex,
+                        )
+                    },
+                    messageRes = activePanelMessageRes,
+                    onStepSelected = { stepId -> engineScope.launch { selectStepFromPanel(stepId) } },
+                    onDeleteStep = { stepId -> engineScope.launch { deleteStep(stepId) } },
+                    onMoveUp = { stepId -> engineScope.launch { moveStep(stepId, -1) } },
+                    onMoveDown = { stepId -> engineScope.launch { moveStep(stepId, 1) } },
+                )
+            }
+
+            OverlayPanelType.ADD_STEP -> {
+                OverlayPanelSpec.AddStep(
+                    messageRes = activePanelMessageRes,
+                    onAddStep = { actionType -> engineScope.launch { addStep(actionType) } },
+                )
+            }
+
+            OverlayPanelType.LOOP_SETTINGS -> {
+                OverlayPanelSpec.LoopSettings(
+                    totalRounds = taskWithSteps.task.totalRounds.toString(),
+                    infiniteRounds = taskWithSteps.task.infiniteRounds,
+                    messageRes = activePanelMessageRes,
+                    onSave = { totalRounds, infiniteRounds ->
+                        engineScope.launch { saveLoopSettings(totalRounds, infiniteRounds) }
+                    },
+                )
+            }
+
+            OverlayPanelType.STEP_EDITOR -> {
+                val selectedStep = taskWithSteps.steps.firstOrNull { it.id == selectedStepId }
+                OverlayPanelSpec.StepEditor(
+                    draft = selectedStep?.toEditorDraft(),
+                    messageRes = activePanelMessageRes,
+                    onSave = { draft -> engineScope.launch { saveCurrentStep(draft) } },
+                )
+            }
+
+            null -> null
+        }
+    }
+
+    private suspend fun selectStepFromPanel(
+        stepId: Long,
+    ) {
+        val taskId = activeTaskId ?: return
+        val task = taskRepository.getTask(taskId)?.let(::normalizeTaskForRuntime) ?: return
+        selectedStepId = stepId
+        publishOverlaySessionState(
+            createOverlaySessionState(
+                normalizedTask = task,
+                isTargetVisible = _overlaySessionState.value.isTargetVisible,
+                statusMessageRes = _overlaySessionState.value.statusMessageRes,
+            ),
+        )
+        if (_overlaySessionState.value.isTargetVisible) {
+            syncOverlayTargets(task)
+        }
+        syncActivePanel(task)
+    }
+
+    private suspend fun deleteStep(
+        stepId: Long,
+    ) {
+        mutateCurrentTaskStructure(
+            successMessageRes = R.string.overlay_panel_save_success,
+            selectionHintProvider = { currentSteps ->
+                val ordered = currentSteps.sortedBy { it.orderIndex }
+                val removedIndex = ordered.indexOfFirst { it.id == stepId }.coerceAtLeast(0)
+                val remaining = ordered.filterNot { it.id == stepId }
+                remaining.getOrNull(removedIndex.coerceAtMost(remaining.lastIndex))?.selectionHint()
+            },
+        ) { current ->
+            current.steps.filterNot { it.id == stepId }
+        }
+    }
+
+    private suspend fun moveStep(
+        stepId: Long,
+        direction: Int,
+    ) {
+        mutateCurrentTaskStructure(
+            successMessageRes = R.string.overlay_panel_save_success,
+            selectionHintProvider = { currentSteps ->
+                currentSteps.firstOrNull { it.id == stepId }?.selectionHint()
+            },
+        ) { current ->
+            val mutable = current.steps.sortedBy { it.orderIndex }.toMutableList()
+            val currentIndex = mutable.indexOfFirst { it.id == stepId }
+            if (currentIndex < 0) return@mutateCurrentTaskStructure mutable
+            val targetIndex = (currentIndex + direction).coerceIn(0, mutable.lastIndex)
+            if (currentIndex == targetIndex) return@mutateCurrentTaskStructure mutable
+            val step = mutable.removeAt(currentIndex)
+            mutable.add(targetIndex, step)
+            mutable
+        }
+    }
+
+    private suspend fun addStep(
+        actionType: ActionType,
+    ) {
+        mutateCurrentTaskStructure(
+            successMessageRes = R.string.overlay_panel_save_success,
+            selectionHintProvider = {
+                StepSelectionHint(
+                    orderIndex = currentInsertionIndex(it),
+                    actionType = actionType,
+                )
+            },
+        ) { current ->
+            val ordered = current.steps.sortedBy { it.orderIndex }.toMutableList()
+            val insertIndex = currentInsertionIndex(ordered)
+            ordered.add(
+                insertIndex,
+                ActionStepEntity(
+                    taskId = current.task.id,
+                    orderIndex = insertIndex,
+                    actionType = actionType.storageValue,
+                    durationMs = defaultDurationFor(actionType),
+                ),
+            )
+            ordered
+        }
+    }
+
+    private suspend fun saveLoopSettings(
+        totalRoundsRaw: String,
+        infiniteRounds: Boolean,
+    ) {
+        val taskId = activeTaskId ?: return
+        val current = taskRepository.getTask(taskId) ?: run {
+            setActivePanelMessage(R.string.error_task_not_found)
+            return
+        }
+        val parsedRounds = if (infiniteRounds) {
+            current.task.totalRounds.coerceAtLeast(1)
+        } else {
+            totalRoundsRaw.trim().toIntOrNull()?.takeIf { it > 0 } ?: run {
+                setActivePanelMessage(R.string.error_invalid_total_rounds)
+                return
+            }
+        }
+        persistWorkbenchTask(
+            originalTask = current,
+            updatedTask = current.task.copy(
+                totalRounds = parsedRounds,
+                infiniteRounds = infiniteRounds,
+                updatedAt = System.currentTimeMillis(),
+            ),
+            updatedSteps = current.steps,
+            selectionHint = currentSelectionHint(current),
+            successMessageRes = R.string.overlay_panel_save_success,
+            autoRestartIfRunning = true,
+        )
+    }
+
+    private suspend fun saveCurrentStep(
+        draft: OverlayStepEditorDraft,
+    ) {
+        val taskId = activeTaskId ?: return
+        val current = taskRepository.getTask(taskId) ?: run {
+            setActivePanelMessage(R.string.error_task_not_found)
+            return
+        }
+        val existingStep = current.steps.firstOrNull { it.id == draft.stepId } ?: run {
+            setActivePanelMessage(R.string.overlay_panel_no_selected_step)
+            return
+        }
+        val updatedStep = buildUpdatedStep(existingStep, draft) ?: run {
+            publishStatusMessage(activePanelMessageRes)
+            syncActivePanel()
+            return
+        }
+        persistWorkbenchTask(
+            originalTask = current,
+            updatedTask = current.task.copy(updatedAt = System.currentTimeMillis()),
+            updatedSteps = current.steps.map { step ->
+                if (step.id == draft.stepId) updatedStep else step
+            },
+            selectionHint = StepSelectionHint(updatedStep.orderIndex, updatedStep.actionTypeEnum()),
+            successMessageRes = R.string.overlay_panel_save_success,
+            autoRestartIfRunning = true,
+        )
+    }
+
+    private suspend fun saveCurrentScheme(
+        rawName: String,
+    ) {
+        val taskId = activeTaskId ?: return
+        val current = taskRepository.getTask(taskId) ?: run {
+            setActivePanelMessage(R.string.error_task_not_found)
+            return
+        }
+        val name = rawName.trim().ifEmpty {
+            appContext.getString(R.string.default_task_name)
+        }
+        persistWorkbenchTask(
+            originalTask = current,
+            updatedTask = current.task.copy(
+                name = name,
+                updatedAt = System.currentTimeMillis(),
+            ),
+            updatedSteps = current.steps,
+            selectionHint = currentSelectionHint(current),
+            successMessageRes = R.string.overlay_panel_save_success,
+            autoRestartIfRunning = true,
+        )
+    }
+
+    private suspend fun saveAsNewScheme(
+        currentTask: TaskWithSteps,
+        rawName: String,
+    ) {
+        val name = rawName.trim().ifEmpty {
+            appContext.getString(R.string.default_task_name)
+        }
+        val now = System.currentTimeMillis()
+        try {
+            val savedTaskId = taskRepository.saveTask(
+                task = currentTask.task.copy(
+                    id = 0L,
+                    name = name,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+                steps = currentTask.steps.map { it.copy(id = 0L, taskId = 0L) },
+            )
+            activePanelMessageRes = R.string.overlay_panel_save_as_success
+            stopRunnerForWorkbenchChange()
+            runtimeStepGeometryMap.clear()
+            loadTaskIntoFloatingMode(
+                taskId = savedTaskId,
+                preferredSelectionHint = currentSelectionHint(currentTask),
+                statusMessageRes = R.string.overlay_panel_save_as_success,
+                initialTargetVisible = _overlaySessionState.value.isTargetVisible,
+            )
+            publishState(RunnerState.IDLE)
+            publishStatusMessage(R.string.overlay_panel_save_as_success)
+            publishError(null)
+        } catch (throwable: Throwable) {
+            Log.e(TAG, "saveAsNewScheme failed taskId=${currentTask.task.id}", throwable)
+            activePanelMessageRes = R.string.overlay_panel_save_failed
+            publishError(mapThrowableToRunnerError(throwable), true, R.string.overlay_panel_save_failed)
+            syncActivePanel(currentTask)
+        }
+    }
+
+    private suspend fun switchTaskScheme(
+        taskId: Long,
+    ) {
+        if (taskId == activeTaskId) {
+            setActivePanelMessage(R.string.overlay_panel_scheme_current)
+            return
+        }
+        activePanelMessageRes = R.string.overlay_panel_scheme_switched
+        stopRunnerForWorkbenchChange()
+        runtimeStepGeometryMap.clear()
+        loadTaskIntoFloatingMode(
+            taskId = taskId,
+            preferredSelectionHint = null,
+            statusMessageRes = R.string.overlay_panel_scheme_switched,
+            initialTargetVisible = _overlaySessionState.value.isTargetVisible,
+        )
+        publishState(RunnerState.IDLE)
+        publishStatusMessage(R.string.overlay_panel_scheme_switched)
+        publishError(null)
+    }
+
+    private suspend fun mutateCurrentTaskStructure(
+        @StringRes successMessageRes: Int,
+        selectionHintProvider: (List<ActionStepEntity>) -> StepSelectionHint?,
+        transform: (TaskWithSteps) -> List<ActionStepEntity>,
+    ) {
+        val taskId = activeTaskId ?: return
+        val current = taskRepository.getTask(taskId) ?: run {
+            setActivePanelMessage(R.string.error_task_not_found)
+            return
+        }
+        val updatedSteps = transform(current)
+            .sortedBy { it.orderIndex }
+            .mapIndexed { index, step -> step.copy(orderIndex = index) }
+        persistWorkbenchTask(
+            originalTask = current,
+            updatedTask = current.task.copy(updatedAt = System.currentTimeMillis()),
+            updatedSteps = updatedSteps,
+            selectionHint = selectionHintProvider(updatedSteps),
+            successMessageRes = successMessageRes,
+            autoRestartIfRunning = true,
+        )
+    }
+
+    private suspend fun persistWorkbenchTask(
+        originalTask: TaskWithSteps,
+        updatedTask: com.example.clickassist.data.local.entity.TaskEntity,
+        updatedSteps: List<ActionStepEntity>,
+        selectionHint: StepSelectionHint?,
+        @StringRes successMessageRes: Int,
+        autoRestartIfRunning: Boolean,
+    ) {
+        val runnerSnapshot = stopRunnerForWorkbenchChange()
+        try {
+            val savedTaskId = taskRepository.saveTask(updatedTask, updatedSteps)
+            activePanelMessageRes = successMessageRes
+            runtimeStepGeometryMap.clear()
+            val loadedTask = loadTaskIntoFloatingMode(
+                taskId = savedTaskId,
+                preferredSelectionHint = selectionHint,
+                statusMessageRes = successMessageRes,
+                initialTargetVisible = _overlaySessionState.value.isTargetVisible,
+            ) ?: return
+            when {
+                runnerSnapshot.wasRunning && autoRestartIfRunning -> {
+                    publishStatusMessage(R.string.overlay_status_starting)
+                    launchRunner(loadedTask)
+                }
+                runnerSnapshot.wasPaused -> {
+                    publishState(RunnerState.PAUSED)
+                    publishStatusMessage(R.string.overlay_panel_paused_updated)
+                }
+                else -> {
+                    publishState(RunnerState.IDLE)
+                    publishStatusMessage(successMessageRes)
+                }
+            }
+            publishError(null)
+        } catch (throwable: Throwable) {
+            Log.e(TAG, "persistWorkbenchTask failed taskId=${originalTask.task.id}", throwable)
+            activePanelMessageRes = R.string.overlay_panel_save_failed
+            publishError(mapThrowableToRunnerError(throwable), true, R.string.overlay_panel_save_failed)
+            syncActivePanel()
+        }
+    }
+
+    private suspend fun stopRunnerForWorkbenchChange(): RunnerSnapshot {
+        val snapshot = RunnerSnapshot(
+            wasRunning = _runnerState.value == RunnerState.RUNNING,
+            wasPaused = _runnerState.value == RunnerState.PAUSED,
+        )
+        runnerJob?.cancelAndJoin()
+        runnerJob = null
+        publishProgress(null)
+        publishState(RunnerState.IDLE)
+        return snapshot
+    }
+
+    private suspend fun setActivePanelMessage(
+        @StringRes messageRes: Int?,
+    ) {
+        activePanelMessageRes = messageRes
+        publishStatusMessage(messageRes)
+        syncActivePanel()
+    }
+
+    private fun buildUpdatedStep(
+        existingStep: ActionStepEntity,
+        draft: OverlayStepEditorDraft,
+    ): ActionStepEntity? {
+        val primaryPoint = parseCoordinatePairForPanel(
+            xValue = draft.x,
+            yValue = draft.y,
+            actionType = draft.actionType,
+            isEnd = false,
+        ) ?: return null
+        val swipeEnd = if (draft.actionType == ActionType.SWIPE) {
+            parseCoordinatePairForPanel(
+                xValue = draft.endX,
+                yValue = draft.endY,
+                actionType = draft.actionType,
+                isEnd = true,
+            ) ?: return null
+        } else {
+            null
+        }
+        val intervalMs = parsePositiveLongForPanel(draft.intervalMs, R.string.error_invalid_interval_ms) ?: return null
+        val repeatCount = parsePositiveIntForPanel(draft.repeatCount, R.string.error_invalid_repeat_count) ?: return null
+        val durationMs = when (draft.actionType) {
+            ActionType.TAP -> draft.durationMs.trim().toLongOrNull()?.coerceAtLeast(1L) ?: existingStep.durationMs.coerceAtLeast(1L)
+            else -> parsePositiveLongForPanel(draft.durationMs, R.string.error_invalid_duration_ms) ?: return null
+        }
+        val preDelayMs = parseNonNegativeLongForPanel(draft.preDelayMs, R.string.validation_numeric_invalid) ?: return null
+        val postDelayMs = parseNonNegativeLongForPanel(draft.postDelayMs, R.string.validation_numeric_invalid) ?: return null
+        return existingStep.copy(
+            actionType = draft.actionType.storageValue,
+            enabled = draft.enabled,
+            x = primaryPoint?.x,
+            y = primaryPoint?.y,
+            endX = swipeEnd?.x,
+            endY = swipeEnd?.y,
+            intervalMs = intervalMs,
+            durationMs = durationMs,
+            repeatCount = repeatCount,
+            preDelayMs = preDelayMs,
+            postDelayMs = postDelayMs,
+        )
+    }
+
+    private fun parseCoordinatePairForPanel(
+        xValue: String,
+        yValue: String,
+        actionType: ActionType,
+        isEnd: Boolean,
+    ): ScreenPoint? {
+        val trimmedX = xValue.trim()
+        val trimmedY = yValue.trim()
+        if (trimmedX.isEmpty() && trimmedY.isEmpty()) {
+            return null
+        }
+        val x = trimmedX.toIntOrNull()
+        val y = trimmedY.toIntOrNull()
+        if (x != null && y != null) {
+            return ScreenPoint(x, y)
+        }
+        activePanelMessageRes = when {
+            actionType == ActionType.SWIPE && isEnd -> R.string.validation_swipe_end_coordinate_invalid
+            actionType == ActionType.SWIPE -> R.string.validation_swipe_start_coordinate_invalid
+            else -> R.string.validation_manual_coordinate_invalid
+        }
+        return null
+    }
+
+    private fun parsePositiveLongForPanel(
+        rawValue: String,
+        @StringRes failureMessageRes: Int,
+    ): Long? {
+        val value = rawValue.trim().toLongOrNull()
+        if (value != null && value > 0L) {
+            return value
+        }
+        activePanelMessageRes = failureMessageRes
+        return null
+    }
+
+    private fun parsePositiveIntForPanel(
+        rawValue: String,
+        @StringRes failureMessageRes: Int,
+    ): Int? {
+        val value = rawValue.trim().toIntOrNull()
+        if (value != null && value > 0) {
+            return value
+        }
+        activePanelMessageRes = failureMessageRes
+        return null
+    }
+
+    private fun parseNonNegativeLongForPanel(
+        rawValue: String,
+        @StringRes failureMessageRes: Int,
+    ): Long? {
+        val value = rawValue.trim().toLongOrNull()
+        if (value != null && value >= 0L) {
+            return value
+        }
+        activePanelMessageRes = failureMessageRes
+        return null
+    }
+
+    private fun ActionStepEntity.toEditorDraft(): OverlayStepEditorDraft {
+        return OverlayStepEditorDraft(
+            stepId = id,
+            orderIndex = orderIndex,
+            actionType = actionTypeEnum(),
+            enabled = enabled,
+            x = x?.toString().orEmpty(),
+            y = y?.toString().orEmpty(),
+            endX = endX?.toString().orEmpty(),
+            endY = endY?.toString().orEmpty(),
+            intervalMs = intervalMs.toString(),
+            durationMs = durationMs.toString(),
+            repeatCount = repeatCount.toString(),
+            preDelayMs = preDelayMs.toString(),
+            postDelayMs = postDelayMs.toString(),
+        )
+    }
+
+    private fun ActionStepEntity.selectionHint(): StepSelectionHint {
+        return StepSelectionHint(orderIndex = orderIndex, actionType = actionTypeEnum())
+    }
+
+    private fun currentSelectionHint(
+        taskWithSteps: TaskWithSteps,
+    ): StepSelectionHint? {
+        return taskWithSteps.steps.firstOrNull { it.id == selectedStepId }?.selectionHint()
+            ?: resolvePreferredSelectedStep(taskWithSteps)?.selectionHint()
+    }
+
+    private fun resolveSelectedStepId(
+        taskWithSteps: TaskWithSteps,
+        preferredSelectionHint: StepSelectionHint?,
+    ): Long? {
+        val sorted = taskWithSteps.steps.sortedBy { it.orderIndex }
+        preferredSelectionHint?.let { hint ->
+            sorted.firstOrNull { it.orderIndex == hint.orderIndex && it.actionTypeEnum() == hint.actionType }?.let { return it.id }
+            sorted.firstOrNull { it.orderIndex == hint.orderIndex }?.let { return it.id }
+        }
+        selectedStepId?.let { currentId ->
+            sorted.firstOrNull { it.id == currentId }?.let { return currentId }
+        }
+        return resolvePreferredSelectedStep(taskWithSteps)?.id
+    }
+
+    private fun currentInsertionIndex(
+        steps: List<ActionStepEntity>,
+    ): Int {
+        val ordered = steps.sortedBy { it.orderIndex }
+        val selectedIndex = ordered.indexOfFirst { it.id == selectedStepId }
+        return if (selectedIndex >= 0) {
+            selectedIndex + 1
+        } else {
+            ordered.size
+        }
+    }
+
+    private fun defaultDurationFor(
+        actionType: ActionType,
+    ): Long {
+        return when (actionType) {
+            ActionType.TAP -> 80L
+            ActionType.LONG_PRESS -> 600L
+            ActionType.SWIPE -> 300L
+            ActionType.WAIT -> 1000L
+        }
+    }
+
     private fun selectStep(
         taskWithSteps: TaskWithSteps,
         stepId: Long,
@@ -1036,7 +1742,10 @@ class TaskRunnerEngine(
                 statusMessageRes = statusMessageRes ?: _overlaySessionState.value.statusMessageRes,
             ),
         )
-        engineScope.launch { syncOverlayTargets(taskWithSteps) }
+        engineScope.launch {
+            syncOverlayTargets(taskWithSteps)
+            syncActivePanel(taskWithSteps)
+        }
     }
 
     private fun ensureAccessibilityServiceReady(
@@ -1088,6 +1797,8 @@ class TaskRunnerEngine(
     private fun clearActiveSessionLocal() {
         activeTaskId = null
         selectedStepId = null
+        activePanelType = null
+        activePanelMessageRes = null
         runtimeStepGeometryMap.clear()
     }
 
@@ -1108,6 +1819,16 @@ class TaskRunnerEngine(
     private data class RuntimeStepGeometry(
         val start: ScreenPoint? = null,
         val end: ScreenPoint? = null,
+    )
+
+    private data class StepSelectionHint(
+        val orderIndex: Int,
+        val actionType: ActionType,
+    )
+
+    private data class RunnerSnapshot(
+        val wasRunning: Boolean,
+        val wasPaused: Boolean,
     )
 
     private data class MarkerMeta(

@@ -16,6 +16,7 @@ import android.view.WindowManager
 import android.view.WindowInsets
 import com.example.clickassist.R
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.service.runner.OverlayPlacementMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,9 +51,12 @@ class OverlayTargetController(
     private val appContext = context.applicationContext
     private val windowManager = requireNotNull(appContext.getSystemService(WindowManager::class.java))
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val markerSizePx = (TargetMarkerView.DEFAULT_SIZE_DP * appContext.resources.displayMetrics.density).roundToInt()
-    private val markerHalfSizePx = markerSizePx / 2
     private val touchSlop = ViewConfiguration.get(appContext).scaledTouchSlop
+    private var currentSettings: AppSettings = AppSettings()
+    private var currentAppearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(appContext, currentSettings)
+    private var markerSizePx: Int = currentAppearance.markerSizePx
+    private var markerHalfSizePx: Int = markerSizePx / 2
 
     private val markerEntries = linkedMapOf<String, MarkerEntry>()
     private val currentPoints = linkedMapOf<String, ScreenPoint>()
@@ -77,6 +81,25 @@ class OverlayTargetController(
     fun currentMarkerPoint(markerId: String): ScreenPoint? = currentPoints[markerId]
 
     fun currentMarkerPoints(): Map<String, ScreenPoint> = currentPoints.toMap()
+
+    fun applySettings(settings: AppSettings) {
+        currentSettings = settings
+        currentAppearance = OverlayAppearance.fromSettings(appContext, settings)
+        markerSizePx = currentAppearance.markerSizePx
+        markerHalfSizePx = markerSizePx / 2
+        runOnMain {
+            layerView?.applyAppearance(currentAppearance)
+            markerEntries.values.forEach { entry ->
+                entry.view.applyAppearance(currentAppearance)
+                entry.layoutParams.width = markerSizePx
+                entry.layoutParams.height = markerSizePx
+            }
+            if (currentMarkers.isNotEmpty()) {
+                bindLayer(layerView ?: return@runOnMain)
+                syncMarkersInternal(currentMarkers)
+            }
+        }
+    }
 
     fun currentMarkerGeometry(markerId: String): MarkerGeometrySnapshot? =
         currentMarkerGeometryInternal(markerId)
@@ -273,6 +296,7 @@ class OverlayTargetController(
     private fun ensureLayerView(): OverlayTargetLayerView {
         layerView?.let { return it }
         return OverlayTargetLayerView(appContext).also {
+            it.applyAppearance(currentAppearance)
             layerView = it
         }
     }
@@ -328,6 +352,7 @@ class OverlayTargetController(
             val entry = markerEntries[model.markerId] ?: createMarkerEntry(model.markerId).also {
                 markerEntries[model.markerId] = it
             }
+            entry.view.applyAppearance(currentAppearance)
             entry.view.bind(
                 label = model.label,
                 actionType = model.actionType,
@@ -338,6 +363,8 @@ class OverlayTargetController(
                 R.string.overlay_target_description_with_label,
                 model.label,
             )
+            entry.layoutParams.width = markerSizePx
+            entry.layoutParams.height = markerSizePx
             entry.layoutParams.flags = markerFlags()
             val point = clampPoint(currentPoints[model.markerId] ?: model.point, bounds)
             applyPointToLayoutParams(
@@ -374,6 +401,7 @@ class OverlayTargetController(
         val view = TargetMarkerView(appContext).apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             isClickable = true
+            applyAppearance(currentAppearance)
             setOnTouchListener { _, event -> handleMarkerTouch(markerId, event) }
         }
         return MarkerEntry(

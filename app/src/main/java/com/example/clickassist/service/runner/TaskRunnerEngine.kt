@@ -8,6 +8,8 @@ import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskWithSteps
 import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.domain.repository.AppSettings
+import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.accessibility.MyAccessibilityService
 import com.example.clickassist.service.overlay.MarkerGeometrySnapshot
@@ -33,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -41,6 +44,7 @@ import kotlin.coroutines.coroutineContext
 class TaskRunnerEngine(
     appContext: Context,
     private val taskRepository: TaskRepository,
+    private val settingsRepository: SettingsRepository,
     private val overlayController: OverlayController,
     private val taskStartValidator: TaskStartValidator,
 ) {
@@ -66,6 +70,7 @@ class TaskRunnerEngine(
     private var placementMode: OverlayPlacementMode = OverlayPlacementMode.NONE
     private var pendingSwipeStartPoint: ScreenPoint? = null
     private val runtimeStepGeometryMap = ConcurrentHashMap<Long, RuntimeStepGeometry>()
+    private var latestSettings: AppSettings = AppSettings()
 
     init {
         overlayController.bindToolbarCallbacks(
@@ -80,6 +85,36 @@ class TaskRunnerEngine(
             ),
         )
         overlayController.bindHandleExpandCallback(::restoreToolbarFromHandle)
+        engineScope.launch {
+            settingsRepository.settingsFlow.collect { settings ->
+                latestSettings = settings
+                overlayController.applySettings(settings)
+                if (!_overlaySessionState.value.isFloatingModeEnabled) {
+                    return@collect
+                }
+                if (_overlaySessionState.value.isToolbarHidden && !settings.showHandleWhenToolbarHidden) {
+                    restoreToolbarFromHandleInternal()
+                    return@collect
+                }
+                val taskId = activeTaskId ?: run {
+                    syncToolbarStateAsync()
+                    return@collect
+                }
+                val task = taskRepository.getTask(taskId)?.let(::normalizeTaskForRuntime) ?: run {
+                    syncToolbarStateAsync()
+                    return@collect
+                }
+                publishOverlaySessionState(
+                    createOverlaySessionState(
+                        normalizedTask = task,
+                        isTargetVisible = _overlaySessionState.value.isTargetVisible,
+                        statusMessageRes = _overlaySessionState.value.statusMessageRes,
+                    ),
+                )
+                syncOverlayTargets(task)
+                syncActivePanel(task)
+            }
+        }
     }
 
     fun enterFloatingMode(taskId: Long) {
@@ -556,6 +591,11 @@ class TaskRunnerEngine(
     private suspend fun hideToolbarToHandleInternal() {
         if (!_overlaySessionState.value.isFloatingModeEnabled) {
             publishError(RunnerError.NoTaskSelected, true)
+            return
+        }
+        if (!latestSettings.showHandleWhenToolbarHidden) {
+            publishStatusMessage(R.string.overlay_status_hide_toolbar_disabled)
+            syncToolbarStateAsync()
             return
         }
         clearPlacementState(syncOverlay = true)
@@ -1644,6 +1684,7 @@ class TaskRunnerEngine(
         initialTargetVisible: Boolean?,
     ): TaskWithSteps? {
         val previousTaskId = activeTaskId
+        val wasFloatingModeEnabled = _overlaySessionState.value.isFloatingModeEnabled
         Log.i(
             TAG,
             "loadTaskIntoFloatingMode request taskId=$taskId previousTaskId=$previousTaskId preferredSelectionHint=$preferredSelectionHint initialTargetVisible=$initialTargetVisible panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
@@ -1719,7 +1760,14 @@ class TaskRunnerEngine(
                 statusMessageRes = statusMessageRes,
             ),
         )
-        syncActivePanel(normalizedTask)
+        if (!wasFloatingModeEnabled &&
+            !latestSettings.toolbarDefaultExpanded &&
+            latestSettings.showHandleWhenToolbarHidden
+        ) {
+            hideToolbarToHandleInternal()
+        } else {
+            syncActivePanel(normalizedTask)
+        }
         Log.i(
             TAG,
             "loadTaskIntoFloatingMode complete taskId=${normalizedTask.task.id} selectedStepId=$selectedStepId panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
@@ -1786,6 +1834,7 @@ class TaskRunnerEngine(
                     ),
                     totalRounds = taskWithSteps.task.totalRounds.toString(),
                     infiniteRounds = taskWithSteps.task.infiniteRounds,
+                    canHideToolbar = latestSettings.showHandleWhenToolbarHidden,
                     schemes = schemes,
                     waitSteps = taskWithSteps.steps
                         .sortedBy { it.orderIndex }
@@ -2433,9 +2482,9 @@ class TaskRunnerEngine(
         actionType: ActionType,
     ): Long {
         return when (actionType) {
-            ActionType.TAP -> 80L
-            ActionType.LONG_PRESS -> 600L
-            ActionType.SWIPE -> 300L
+            ActionType.TAP -> latestSettings.defaultTapDurationMs
+            ActionType.LONG_PRESS -> latestSettings.defaultLongPressDurationMs
+            ActionType.SWIPE -> latestSettings.defaultSwipeDurationMs
             ActionType.WAIT -> 1000L
         }
     }

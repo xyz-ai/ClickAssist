@@ -21,6 +21,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.annotation.StringRes
 import com.example.clickassist.R
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.ui.overlay.OverlayAddStepPanelView
 import com.example.clickassist.ui.overlay.OverlaySchemePanelView
 import com.example.clickassist.ui.overlay.OverlayStepEditorView
@@ -42,12 +43,23 @@ class OverlayPanelController(
     private var contentHost: FrameLayout? = null
     private var onCloseRequested: (() -> Unit)? = null
     private var boundsCache: Rect? = null
+    private var currentSpec: OverlayPanelSpec? = null
+    private var currentAppearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(appContext, AppSettings())
 
     var onBoundsChanged: ((Rect?) -> Unit)? = null
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
     fun currentBounds(): Rect? = boundsCache?.let(::Rect)
+
+    fun applySettings(settings: AppSettings) {
+        currentAppearance = OverlayAppearance.fromSettings(appContext, settings)
+        runOnMain {
+            applyAppearanceInternal()
+            currentSpec?.let(::bindPanel)
+        }
+    }
 
     suspend fun showPanel(
         spec: OverlayPanelSpec,
@@ -57,6 +69,7 @@ class OverlayPanelController(
             return@withContext false
         }
         this@OverlayPanelController.onCloseRequested = onCloseRequested
+        currentSpec = spec
         val view = ensurePanelRoot()
         bindPanel(spec)
         val layoutParams = panelLayoutParams ?: createLayoutParams().also { panelLayoutParams = it }
@@ -120,10 +133,6 @@ class OverlayPanelController(
         val container = LinearLayout(appContext).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(14), dp(14), dp(14))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#F8FAFC"))
-                cornerRadius = dpFloat(20)
-            }
             elevation = dpFloat(8)
         }
 
@@ -132,12 +141,10 @@ class OverlayPanelController(
             gravity = Gravity.CENTER_VERTICAL
         }
         titleTextView = TextView(appContext).apply {
-            setTextColor(Color.parseColor("#0F172A"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setPadding(0, 0, dp(8), 0)
         }
         val closeView = TextView(appContext).apply {
-            setTextColor(Color.parseColor("#475569"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             text = appContext.getString(R.string.overlay_panel_close)
             isClickable = true
@@ -162,7 +169,6 @@ class OverlayPanelController(
         )
 
         messageTextView = TextView(appContext).apply {
-            setTextColor(Color.parseColor("#0F766E"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             visibility = View.GONE
         }
@@ -206,6 +212,7 @@ class OverlayPanelController(
         )
 
         panelRoot = container
+        applyAppearanceInternal()
         return container
     }
 
@@ -213,9 +220,18 @@ class OverlayPanelController(
         spec: OverlayPanelSpec,
     ): View {
         return when (spec) {
-            is OverlayPanelSpec.Settings -> OverlaySchemePanelView(appContext).apply { bind(spec) }
-            is OverlayPanelSpec.AddNode -> OverlayAddStepPanelView(appContext).apply { bind(spec) }
-            is OverlayPanelSpec.StepEditor -> OverlayStepEditorView(appContext).apply { bind(spec) }
+            is OverlayPanelSpec.Settings -> OverlaySchemePanelView(appContext).apply {
+                applyAppearance(currentAppearance)
+                bind(spec)
+            }
+            is OverlayPanelSpec.AddNode -> OverlayAddStepPanelView(appContext).apply {
+                applyAppearance(currentAppearance)
+                bind(spec)
+            }
+            is OverlayPanelSpec.StepEditor -> OverlayStepEditorView(appContext).apply {
+                applyAppearance(currentAppearance)
+                bind(spec)
+            }
         }
     }
 
@@ -239,6 +255,7 @@ class OverlayPanelController(
         if (view.parent != null) {
             runCatching { windowManager.removeView(view) }
         }
+        currentSpec = null
         boundsCache = null
         onBoundsChanged?.invoke(null)
     }
@@ -292,6 +309,21 @@ class OverlayPanelController(
 
     private companion object {
         const val TAG = "OverlayToolbar"
+    }
+
+    private fun applyAppearanceInternal() {
+        panelRoot?.background = GradientDrawable().apply {
+            setColor(currentAppearance.panelBackgroundColor)
+            cornerRadius = dpFloat(20)
+            setStroke(dp(1), currentAppearance.panelBorderColor)
+        }
+        titleTextView?.setTextColor(currentAppearance.textPrimaryColor)
+        messageTextView?.setTextColor(currentAppearance.neutralActionColor)
+        contentHost?.getChildAt(0)?.let { child ->
+            if (child is OverlayStylable) {
+                child.applyAppearance(currentAppearance)
+            }
+        }
     }
 
     private fun runOnMain(block: () -> Unit) {

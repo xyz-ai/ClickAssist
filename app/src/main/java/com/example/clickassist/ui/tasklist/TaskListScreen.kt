@@ -45,6 +45,7 @@ fun TaskListScreen(
     onCreateTask: () -> Unit,
     onEditTask: (Long) -> Unit,
     onOpenPermissions: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -64,6 +65,9 @@ fun TaskListScreen(
             TopAppBar(
                 title = { Text(text = stringResource(R.string.task_list_title)) },
                 actions = {
+                    TextButton(onClick = onOpenSettings) {
+                        Text(text = stringResource(R.string.settings_title))
+                    }
                     TextButton(onClick = onOpenPermissions) {
                         Text(text = stringResource(R.string.task_list_action_permissions))
                     }
@@ -72,7 +76,7 @@ fun TaskListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = onCreateTask) {
-                Text(text = "+")
+                Text(text = stringResource(R.string.common_add))
             }
         },
     ) { innerPadding ->
@@ -322,15 +326,22 @@ private fun buildStepSummary(
                 title = stringResource(
                     if (hasPoint) R.string.task_list_position_set else R.string.task_list_position_not_set,
                 ),
-                detail = stringResource(
-                    R.string.task_list_step_brief,
-                    stringResource(R.string.action_type_tap),
-                    step.repeatCount,
-                    step.intervalMs,
-                ) + if (hasPoint) {
-                    " · " + stringResource(R.string.task_list_coordinate, step.x!!, step.y!!)
+                detail = if (hasPoint) {
+                    stringResource(
+                        R.string.task_list_step_brief_with_coordinate,
+                        stringResource(R.string.action_type_tap),
+                        step.repeatCount,
+                        step.intervalMs,
+                        step.x ?: 0,
+                        step.y ?: 0,
+                    )
                 } else {
-                    ""
+                    stringResource(
+                        R.string.task_list_step_brief,
+                        stringResource(R.string.action_type_tap),
+                        step.repeatCount,
+                        step.intervalMs,
+                    )
                 },
             )
         }
@@ -341,16 +352,24 @@ private fun buildStepSummary(
                 title = stringResource(
                     if (hasPoint) R.string.task_list_position_set else R.string.task_list_position_not_set,
                 ),
-                detail = stringResource(
-                    R.string.task_list_step_brief_with_duration,
-                    stringResource(R.string.action_type_long_press),
-                    step.repeatCount,
-                    step.intervalMs,
-                    step.durationMs,
-                ) + if (hasPoint) {
-                    " · " + stringResource(R.string.task_list_coordinate, step.x!!, step.y!!)
+                detail = if (hasPoint) {
+                    stringResource(
+                        R.string.task_list_step_brief_with_duration_and_coordinate,
+                        stringResource(R.string.action_type_long_press),
+                        step.repeatCount,
+                        step.intervalMs,
+                        step.durationMs,
+                        step.x ?: 0,
+                        step.y ?: 0,
+                    )
                 } else {
-                    ""
+                    stringResource(
+                        R.string.task_list_step_brief_with_duration,
+                        stringResource(R.string.action_type_long_press),
+                        step.repeatCount,
+                        step.intervalMs,
+                        step.durationMs,
+                    )
                 },
             )
         }

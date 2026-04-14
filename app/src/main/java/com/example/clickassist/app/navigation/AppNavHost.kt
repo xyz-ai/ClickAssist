@@ -11,9 +11,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.clickassist.app.AppContainer
 import com.example.clickassist.ui.permission.PermissionGuideScreen
+import com.example.clickassist.ui.settings.SettingsScreen
 import com.example.clickassist.ui.taskedit.TaskEditScreen
 import com.example.clickassist.ui.tasklist.TaskListScreen
 import com.example.clickassist.viewmodel.PermissionGuideViewModel
+import com.example.clickassist.viewmodel.SettingsViewModel
 import com.example.clickassist.viewmodel.TaskEditViewModel
 import com.example.clickassist.viewmodel.TaskListViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.collectLatest
 private const val PERMISSION_GUIDE_ROUTE = "permission_guide"
 private const val TASK_LIST_ROUTE = "task_list"
 private const val TASK_EDIT_ROUTE = "task_edit"
+private const val SETTINGS_ROUTE = "settings"
 private const val TASK_ID_ARG = "taskId"
 private const val TASK_SAVE_RESULT_KEY = "task_save_result"
 
@@ -72,6 +75,7 @@ fun AppNavHost(
                 onCreateTask = { navController.navigate(taskEditRoute(0L)) },
                 onEditTask = { taskId -> navController.navigate(taskEditRoute(taskId)) },
                 onOpenPermissions = { navController.navigate(PERMISSION_GUIDE_ROUTE) },
+                onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
             )
         }
 
@@ -100,6 +104,17 @@ fun AppNavHost(
                         ?.set(TASK_SAVE_RESULT_KEY, savedTaskId)
                     navController.navigateUp()
                 },
+            )
+        }
+
+        composable(route = SETTINGS_ROUTE) {
+            val viewModel: SettingsViewModel = viewModel(
+                factory = SettingsViewModel.factory(appContainer),
+            )
+
+            SettingsScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() },
             )
         }
     }

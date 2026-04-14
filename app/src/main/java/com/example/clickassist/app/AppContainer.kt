@@ -92,6 +92,7 @@ class DefaultAppContainer(
         TaskRunnerEngine(
             appContext = appContext,
             taskRepository = taskRepository,
+            settingsRepository = settingsRepository,
             overlayController = overlayController,
             taskStartValidator = taskStartValidator,
         )

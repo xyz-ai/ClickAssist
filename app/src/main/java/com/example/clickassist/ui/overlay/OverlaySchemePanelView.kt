@@ -15,14 +15,20 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.example.clickassist.R
+import com.example.clickassist.domain.repository.AppSettings
+import com.example.clickassist.service.overlay.OverlayAppearance
 import com.example.clickassist.service.overlay.OverlaySchemeItem
 import com.example.clickassist.service.overlay.OverlayPanelSpec
+import com.example.clickassist.service.overlay.OverlayStylable
 import com.example.clickassist.service.overlay.OverlayWaitStepItem
 import kotlin.math.roundToInt
 
 class OverlaySchemePanelView(
     context: Context,
-) : ScrollView(context) {
+) : ScrollView(context), OverlayStylable {
+    private var appearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(context, AppSettings())
+    private var lastModel: OverlayPanelSpec.Settings? = null
     private val contentContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -52,7 +58,9 @@ class OverlaySchemePanelView(
     }
 
     fun bind(model: OverlayPanelSpec.Settings) {
+        lastModel = model
         contentContainer.removeAllViews()
+        setBackgroundColor(appearance.panelBackgroundColor)
 
         currentNameInput.setText(model.currentTaskName)
         saveAsInput.setText(model.saveAsDefaultName)
@@ -104,7 +112,10 @@ class OverlaySchemePanelView(
                 model.onHideToolbar()
             },
             topMarginMatchParams(),
-        )
+        ).also { params ->
+            (contentContainer.getChildAt(contentContainer.childCount - 1) as? Button)?.isEnabled =
+                model.canHideToolbar
+        }
 
         contentContainer.addView(
             actionButton(R.string.overlay_action_close_floating) {
@@ -366,6 +377,11 @@ class OverlaySchemePanelView(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    override fun applyAppearance(appearance: OverlayAppearance) {
+        this.appearance = appearance
+        lastModel?.let(::bind)
     }
 
     private companion object {

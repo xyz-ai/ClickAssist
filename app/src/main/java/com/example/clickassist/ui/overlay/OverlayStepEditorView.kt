@@ -14,13 +14,19 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.example.clickassist.R
 import com.example.clickassist.domain.model.ActionType
+import com.example.clickassist.domain.repository.AppSettings
+import com.example.clickassist.service.overlay.OverlayAppearance
 import com.example.clickassist.service.overlay.OverlayPanelSpec
 import com.example.clickassist.service.overlay.OverlayStepEditorDraft
+import com.example.clickassist.service.overlay.OverlayStylable
 import kotlin.math.roundToInt
 
 class OverlayStepEditorView(
     context: Context,
-) : ScrollView(context) {
+) : ScrollView(context), OverlayStylable {
+    private var appearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(context, AppSettings())
+    private var lastModel: OverlayPanelSpec.StepEditor? = null
     private val contentContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -58,7 +64,9 @@ class OverlayStepEditorView(
     }
 
     fun bind(model: OverlayPanelSpec.StepEditor) {
+        lastModel = model
         contentContainer.removeAllViews()
+        setBackgroundColor(appearance.panelBackgroundColor)
         val draft = model.draft
         if (draft == null) {
             contentContainer.addView(
@@ -155,6 +163,11 @@ class OverlayStepEditorView(
                 topMarginParams(),
             )
         }
+    }
+
+    override fun applyAppearance(appearance: OverlayAppearance) {
+        this.appearance = appearance
+        lastModel?.let(::bind)
     }
 
     private fun labeledField(

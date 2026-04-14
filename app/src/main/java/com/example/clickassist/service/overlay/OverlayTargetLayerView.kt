@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.View
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.service.runner.OverlayPlacementMode
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -17,16 +18,12 @@ class OverlayTargetLayerView(
 ) : View(context) {
     private val density = resources.displayMetrics.density
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#60A5FA")
         style = Paint.Style.STROKE
-        strokeWidth = 10f * density
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val selectedLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F59E0B")
         style = Paint.Style.STROKE
-        strokeWidth = 14f * density
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
@@ -43,9 +40,21 @@ class OverlayTargetLayerView(
     private var downX = 0f
     private var downY = 0f
     private var dragging = false
+    private var appearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(context, AppSettings())
 
     init {
         setWillNotDraw(false)
+        applyAppearance(appearance)
+    }
+
+    fun applyAppearance(appearance: OverlayAppearance) {
+        this.appearance = appearance
+        linePaint.color = appearance.swipeLineColor
+        linePaint.strokeWidth = appearance.swipeLineWidthPx
+        selectedLinePaint.color = appearance.swipeSelectedLineColor
+        selectedLinePaint.strokeWidth = appearance.swipeSelectedLineWidthPx
+        invalidate()
     }
 
     fun bind(

@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.StringRes
 import com.example.clickassist.R
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.service.runner.OverlayPlacementMode
@@ -70,6 +71,7 @@ class OverlayToolbarController(
 
     private var toolbarView: DragInterceptLayout? = null
     private var toolbarLayoutParams: WindowManager.LayoutParams? = null
+    private var containerView: LinearLayout? = null
     private var contentContainer: LinearLayout? = null
     private var startButton: TextView? = null
     private var pauseButton: TextView? = null
@@ -83,6 +85,8 @@ class OverlayToolbarController(
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
     private var callbacksBound: Boolean = false
+    private var currentSettings: AppSettings = AppSettings()
+    private var currentAppearance: OverlayAppearance = OverlayAppearance.fromSettings(appContext, currentSettings)
     private var currentUiState = OverlayToolbarUiState(
         runnerState = RunnerState.IDLE,
         isTargetVisible = false,
@@ -92,6 +96,28 @@ class OverlayToolbarController(
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
     fun currentBounds(): Rect? = boundsCache?.let(::Rect)
+
+    fun applySettings(settings: AppSettings) {
+        currentSettings = settings
+        currentAppearance = OverlayAppearance.fromSettings(appContext, settings)
+        runOnMain {
+            applyAppearanceInternal()
+            toolbarView?.let { view ->
+                toolbarLayoutParams?.let { layoutParams ->
+                    applyPosition(
+                        layoutParams = layoutParams,
+                        view = view,
+                        desiredX = layoutParams.x,
+                        desiredY = layoutParams.y,
+                    )
+                    if (view.parent != null) {
+                        runCatching { windowManager.updateViewLayout(view, layoutParams) }
+                    }
+                    updateBoundsCache()
+                }
+            }
+        }
+    }
 
     suspend fun show(
         uiState: OverlayToolbarUiState,
@@ -217,15 +243,11 @@ class OverlayToolbarController(
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#D90F172A"))
-                cornerRadius = dpFloat(22)
-            }
         }
+        containerView = container
 
         startButton = createActionButton(
             labelRes = R.string.overlay_action_start,
-            backgroundColor = Color.parseColor("#047857"),
         ) {
             dispatchAction("start", isActionEnabled(startButton)) {
                 callbacks.onStartRequested()
@@ -234,7 +256,6 @@ class OverlayToolbarController(
 
         pauseButton = createActionButton(
             labelRes = R.string.overlay_action_pause,
-            backgroundColor = Color.parseColor("#B45309"),
         ) {
             dispatchAction("pause", isActionEnabled(pauseButton)) {
                 callbacks.onPauseRequested()
@@ -243,7 +264,6 @@ class OverlayToolbarController(
 
         stopButton = createActionButton(
             labelRes = R.string.overlay_action_stop,
-            backgroundColor = Color.parseColor("#B91C1C"),
         ) {
             dispatchAction("stop", isActionEnabled(stopButton)) {
                 callbacks.onStopRequested()
@@ -252,7 +272,6 @@ class OverlayToolbarController(
 
         addNodeButton = createActionButton(
             labelRes = R.string.overlay_action_add_node,
-            backgroundColor = Color.parseColor("#0F766E"),
         ) {
             dispatchAction("addNode", isActionEnabled(addNodeButton)) {
                 callbacks.onAddNodeRequested()
@@ -261,7 +280,6 @@ class OverlayToolbarController(
 
         deleteButton = createActionButton(
             labelRes = R.string.overlay_action_delete_node,
-            backgroundColor = Color.parseColor("#7C2D12"),
         ) {
             dispatchAction("deleteSelectedNode", isActionEnabled(deleteButton)) {
                 callbacks.onDeleteSelectedRequested()
@@ -270,7 +288,6 @@ class OverlayToolbarController(
 
         settingsButton = createActionButton(
             labelRes = R.string.overlay_action_settings,
-            backgroundColor = Color.parseColor("#1D4ED8"),
         ) {
             dispatchAction("settings", isActionEnabled(settingsButton)) {
                 callbacks.onSettingsRequested()
@@ -279,7 +296,6 @@ class OverlayToolbarController(
 
         toggleTargetButton = createActionButton(
             labelRes = R.string.overlay_action_hide_target,
-            backgroundColor = Color.parseColor("#4F46E5"),
         ) {
             dispatchAction(
                 actionName = if (currentUiState.isTargetVisible) "hideTarget" else "showTarget",
@@ -290,7 +306,6 @@ class OverlayToolbarController(
         }.also { container.addToolbarButton(it) }
 
         statusTextView = TextView(appContext).apply {
-            setTextColor(Color.parseColor("#E2E8F0"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setPadding(dp(6), dp(10), dp(6), dp(2))
         }.also { view ->
@@ -312,6 +327,7 @@ class OverlayToolbarController(
             ),
         )
         toolbarView = root
+        applyAppearanceInternal()
         return root
     }
 
@@ -420,19 +436,13 @@ class OverlayToolbarController(
 
     private fun createActionButton(
         @StringRes labelRes: Int,
-        backgroundColor: Int,
         onClick: () -> Unit,
     ): TextView {
         return TextView(appContext).apply {
-            background = GradientDrawable().apply {
-                setColor(backgroundColor)
-                cornerRadius = dpFloat(18)
-            }
             gravity = Gravity.CENTER
-            minWidth = dp(92)
-            minHeight = dp(40)
+            minWidth = dp(96)
+            minHeight = dp(42)
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             text = appContext.getString(labelRes)
             contentDescription = text
@@ -468,6 +478,33 @@ class OverlayToolbarController(
     ) {
         isEnabled = enabled
         alpha = if (enabled) 1f else 0.45f
+    }
+
+    private fun applyAppearanceInternal() {
+        containerView?.background = GradientDrawable().apply {
+            setColor(currentAppearance.toolbarBackgroundColor)
+            cornerRadius = dpFloat(22)
+        }
+        applyButtonStyle(startButton, currentAppearance.primaryActionColor)
+        applyButtonStyle(pauseButton, currentAppearance.warningActionColor)
+        applyButtonStyle(stopButton, currentAppearance.dangerActionColor)
+        applyButtonStyle(addNodeButton, currentAppearance.neutralActionColor)
+        applyButtonStyle(deleteButton, currentAppearance.dangerActionColor)
+        applyButtonStyle(settingsButton, currentAppearance.primaryActionColor)
+        applyButtonStyle(toggleTargetButton, currentAppearance.neutralActionColor)
+        statusTextView?.setTextColor(currentAppearance.toolbarStatusTextColor)
+    }
+
+    private fun applyButtonStyle(
+        button: TextView?,
+        backgroundColor: Int,
+    ) {
+        button ?: return
+        button.background = GradientDrawable().apply {
+            setColor(backgroundColor)
+            cornerRadius = dpFloat(18)
+        }
+        button.setTextColor(currentAppearance.toolbarButtonTextColor)
     }
 
     @StringRes

@@ -20,6 +20,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.example.clickassist.R
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.domain.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,12 +46,25 @@ class OverlayHandleController(
     private var handleButton: TextView? = null
     private var boundsCache: Rect? = null
     private var onExpandRequested: (() -> Unit)? = null
+    private var currentAppearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(appContext, AppSettings())
 
     var onBoundsChanged: ((Rect?) -> Unit)? = null
 
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
     fun currentBounds(): Rect? = boundsCache?.let(::Rect)
+
+    fun applySettings(settings: AppSettings) {
+        currentAppearance = OverlayAppearance.fromSettings(appContext, settings)
+        runOnMain {
+            handleButton?.background = GradientDrawable().apply {
+                setColor(currentAppearance.toolbarBackgroundColor)
+                cornerRadius = dpFloat(18)
+            }
+            handleButton?.setTextColor(currentAppearance.textPrimaryColor)
+        }
+    }
 
     suspend fun show(
         preferredX: Int? = null,
@@ -127,15 +141,10 @@ class OverlayHandleController(
         }
 
         handleButton = TextView(appContext).apply {
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#D90F172A"))
-                cornerRadius = dpFloat(18)
-            }
             gravity = Gravity.CENTER
             minWidth = dp(34)
             minHeight = dp(64)
             setPadding(dp(10), dp(12), dp(10), dp(12))
-            setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             text = ">"
             contentDescription = appContext.getString(R.string.overlay_action_show_toolbar)
@@ -146,6 +155,11 @@ class OverlayHandleController(
                 onExpandRequested?.invoke()
             }
         }
+        handleButton?.background = GradientDrawable().apply {
+            setColor(currentAppearance.toolbarBackgroundColor)
+            cornerRadius = dpFloat(18)
+        }
+        handleButton?.setTextColor(currentAppearance.textPrimaryColor)
 
         root.addView(
             handleButton,

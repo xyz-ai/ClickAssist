@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.util.Log
 import androidx.annotation.StringRes
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.service.runner.OverlayPlacementMode
 
 class OverlayController(
@@ -311,5 +312,12 @@ class OverlayController(
 
     fun requestAdSlotEntry() {
         adSlotEntryCallback?.invoke()
+    }
+
+    fun applySettings(settings: AppSettings) {
+        toolbarController.applySettings(settings)
+        targetController.applySettings(settings)
+        panelController.applySettings(settings)
+        handleController.applySettings(settings)
     }
 }

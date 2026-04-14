@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
 import com.example.clickassist.domain.model.ActionType
+import com.example.clickassist.domain.repository.AppSettings
 import kotlin.math.min
 
 class TargetMarkerView @JvmOverloads constructor(
@@ -29,11 +30,9 @@ class TargetMarkerView @JvmOverloads constructor(
         strokeWidth = 2f * resources.displayMetrics.density
     }
     private val centerOuterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#111827")
         style = Paint.Style.FILL
     }
     private val centerInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FDE047")
         style = Paint.Style.FILL
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -53,6 +52,13 @@ class TargetMarkerView @JvmOverloads constructor(
     private var actionType: ActionType = ActionType.TAP
     private var role: OverlayMarkerRole = OverlayMarkerRole.PRIMARY
     private var isSelected: Boolean = false
+    private var appearance: OverlayAppearance =
+        OverlayAppearance.fromSettings(context, AppSettings())
+
+    fun applyAppearance(appearance: OverlayAppearance) {
+        this.appearance = appearance
+        invalidate()
+    }
 
     fun bind(
         label: String,
@@ -85,6 +91,8 @@ class TargetMarkerView @JvmOverloads constructor(
         } else {
             2f * resources.displayMetrics.density
         }
+        centerOuterPaint.color = appearance.markerCenterOuterColor
+        centerInnerPaint.color = appearance.markerCenterInnerColor
 
         val centerX = width / 2f
         val centerY = height / 2f
@@ -96,12 +104,14 @@ class TargetMarkerView @JvmOverloads constructor(
 
         canvas.drawCircle(centerX, centerY, outerRadius, outerPaint)
         canvas.drawCircle(centerX, centerY, innerRadius, ringPaint)
-        canvas.drawLine(centerX - crosshairRadius, centerY, centerX + crosshairRadius, centerY, crosshairPaint)
-        canvas.drawLine(centerX, centerY - crosshairRadius, centerX, centerY + crosshairRadius, crosshairPaint)
-        canvas.drawCircle(centerX, centerY, centerOuterRadius, centerOuterPaint)
-        canvas.drawCircle(centerX, centerY, centerInnerRadius, centerInnerPaint)
+        if (appearance.showMarkerCenterCross) {
+            canvas.drawLine(centerX - crosshairRadius, centerY, centerX + crosshairRadius, centerY, crosshairPaint)
+            canvas.drawLine(centerX, centerY - crosshairRadius, centerX, centerY + crosshairRadius, crosshairPaint)
+            canvas.drawCircle(centerX, centerY, centerOuterRadius, centerOuterPaint)
+            canvas.drawCircle(centerX, centerY, centerInnerRadius, centerInnerPaint)
+        }
 
-        if (label.isNotEmpty()) {
+        if (appearance.showMarkerNumbers && label.isNotEmpty()) {
             val baseline = centerY + outerRadius * 0.46f - ((textPaint.descent() + textPaint.ascent()) / 2f)
             canvas.drawText(label, centerX, baseline, textPaint)
         }
@@ -113,19 +123,19 @@ class TargetMarkerView @JvmOverloads constructor(
         isSelected: Boolean,
     ): Int {
         if (isSelected) {
-            return Color.parseColor("#F59E0B")
+            return appearance.markerSelectedColor
         }
         return when (actionType) {
-            ActionType.TAP -> Color.parseColor("#E53935")
-            ActionType.LONG_PRESS -> Color.parseColor("#8E24AA")
+            ActionType.TAP -> appearance.markerTapColor
+            ActionType.LONG_PRESS -> appearance.markerLongPressColor
             ActionType.SWIPE -> {
                 when (role) {
-                    OverlayMarkerRole.START -> Color.parseColor("#2563EB")
-                    OverlayMarkerRole.END -> Color.parseColor("#0891B2")
-                    OverlayMarkerRole.PRIMARY -> Color.parseColor("#2563EB")
+                    OverlayMarkerRole.START -> appearance.markerSwipeStartColor
+                    OverlayMarkerRole.END -> appearance.markerSwipeEndColor
+                    OverlayMarkerRole.PRIMARY -> appearance.markerSwipeStartColor
                 }
             }
-            ActionType.WAIT -> Color.parseColor("#4B5563")
+            ActionType.WAIT -> appearance.textSecondaryColor
         }
     }
 

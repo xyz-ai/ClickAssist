@@ -68,7 +68,11 @@ fun TaskEditScreen(
                 title = {
                     Text(
                         text = stringResource(
-                            if (uiState.taskId == 0L) R.string.task_edit_title_new else R.string.task_edit_title_edit,
+                            if (uiState.taskId == 0L) {
+                                R.string.task_edit_title_new
+                            } else {
+                                R.string.task_edit_title_edit
+                            },
                         ),
                     )
                 },
@@ -89,7 +93,7 @@ fun TaskEditScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { viewModel.addStep(ActionType.TAP) }) {
-                Text(text = "+")
+                Text(text = stringResource(R.string.common_add))
             }
         },
     ) { innerPadding ->
@@ -167,7 +171,11 @@ fun TaskEditScreen(
             ) {
                 Text(
                     text = stringResource(
-                        if (uiState.isSaving) R.string.task_edit_action_saving else R.string.task_edit_action_save_task,
+                        if (uiState.isSaving) {
+                            R.string.task_edit_action_saving
+                        } else {
+                            R.string.task_edit_action_save_task
+                        },
                     ),
                 )
             }
@@ -209,7 +217,10 @@ private fun TaskSaveStatusSection(
         ) {
             saveStatusMessageRes?.let { messageRes ->
                 val messageText = if (saveStatus == SaveStatus.ERROR && !saveErrorDetail.isNullOrBlank()) {
-                    stringResource(R.string.task_edit_save_status_failed_with_reason, saveErrorDetail.orEmpty())
+                    stringResource(
+                        R.string.task_edit_save_status_failed_with_reason,
+                        saveErrorDetail.orEmpty(),
+                    )
                 } else {
                     stringResource(messageRes)
                 }
@@ -405,7 +416,12 @@ private fun buildStepSummaryText(
             val pointText = draft.point?.let { point ->
                 stringResource(R.string.task_edit_position_selected, point.x, point.y)
             } ?: stringResource(R.string.task_edit_position_not_selected)
-            "$typeText · $enabledText · $pointText"
+            stringResource(
+                R.string.task_edit_step_summary_tap_like,
+                typeText,
+                enabledText,
+                pointText,
+            )
         }
 
         ActionType.SWIPE -> {
@@ -415,10 +431,21 @@ private fun buildStepSummaryText(
             val endText = draft.endPoint?.let { point ->
                 stringResource(R.string.task_edit_swipe_end_short, point.x, point.y)
             } ?: stringResource(R.string.task_edit_swipe_end_not_selected)
-            "$typeText · $enabledText · $startText · $endText"
+            stringResource(
+                R.string.task_edit_step_summary_swipe,
+                typeText,
+                enabledText,
+                startText,
+                endText,
+            )
         }
 
-        ActionType.WAIT -> "$typeText · $enabledText · ${stringResource(R.string.task_edit_wait_summary, draft.durationMs)}"
+        ActionType.WAIT -> stringResource(
+            R.string.task_edit_step_summary_wait,
+            typeText,
+            enabledText,
+            stringResource(R.string.task_edit_wait_summary, draft.durationMs),
+        )
     }
 }
 

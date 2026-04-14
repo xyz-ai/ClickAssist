@@ -54,6 +54,7 @@ sealed interface OverlayPanelSpec {
         val saveAsDefaultName: String,
         val totalRounds: String,
         val infiniteRounds: Boolean,
+        val canHideToolbar: Boolean,
         val schemes: List<OverlaySchemeItem>,
         val waitSteps: List<OverlayWaitStepItem>,
         override val messageRes: Int? = null,

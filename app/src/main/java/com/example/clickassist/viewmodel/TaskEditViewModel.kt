@@ -11,8 +11,10 @@ import com.example.clickassist.data.local.entity.ActionStepEntity
 import com.example.clickassist.data.local.entity.TaskEntity
 import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.model.ScreenPoint
+import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.domain.repository.TaskRepository
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -102,8 +104,28 @@ class TaskEditViewModel(
     val savedTaskIds = _savedTaskIds.asSharedFlow()
 
     private var nextDraftKey = 2L
+    private var latestSettings = AppSettings()
+    private var hasAppliedNewTaskDefaults = false
 
     init {
+        viewModelScope.launch {
+            settingsRepository.settingsFlow.collect { settings ->
+                latestSettings = settings
+                if (taskId == 0L && !hasAppliedNewTaskDefaults) {
+                    hasAppliedNewTaskDefaults = true
+                    val current = internalState.value
+                    if (current.steps.size == 1 && current.steps.first().stepId == 0L && current.name.isBlank()) {
+                        internalState.value = current.copy(
+                            totalRounds = settings.defaultTotalRounds.toString(),
+                            steps = current.steps.map { draft ->
+                                defaultDraft(draft.draftKey, draft.actionType)
+                            },
+                            editingStepKey = current.editingStepKey ?: current.steps.first().draftKey,
+                        )
+                    }
+                }
+            }
+        }
         if (taskId != 0L) {
             loadTask()
         }
@@ -146,12 +168,7 @@ class TaskEditViewModel(
     fun moveStepDown(draftKey: Long) = moveStep(draftKey, 1)
 
     fun updateStepActionType(draftKey: Long, actionType: ActionType) = updateDraft(draftKey) {
-        val defaultDuration = when (actionType) {
-            ActionType.TAP -> "80"
-            ActionType.LONG_PRESS -> "600"
-            ActionType.SWIPE -> "300"
-            ActionType.WAIT -> "1000"
-        }
+        val defaultDuration = defaultDurationFor(actionType).toString()
         copy(actionType = actionType, durationMs = defaultDuration)
     }
 
@@ -551,15 +568,17 @@ class TaskEditViewModel(
         return EditableStepDraft(
             draftKey = draftKey,
             actionType = actionType,
+            intervalMs = latestSettings.defaultStepIntervalMs.toString(),
             durationMs = defaultDurationFor(actionType).toString(),
+            repeatCount = latestSettings.defaultNewStepRepeatCount.toString(),
         )
     }
 
     private fun defaultDurationFor(actionType: ActionType): Long {
         return when (actionType) {
-            ActionType.TAP -> 80L
-            ActionType.LONG_PRESS -> 600L
-            ActionType.SWIPE -> 300L
+            ActionType.TAP -> latestSettings.defaultTapDurationMs
+            ActionType.LONG_PRESS -> latestSettings.defaultLongPressDurationMs
+            ActionType.SWIPE -> latestSettings.defaultSwipeDurationMs
             ActionType.WAIT -> 1000L
         }
     }

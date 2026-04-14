@@ -28,6 +28,14 @@ class TargetMarkerView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 2f * resources.displayMetrics.density
     }
+    private val centerOuterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#111827")
+        style = Paint.Style.FILL
+    }
+    private val centerInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FDE047")
+        style = Paint.Style.FILL
+    }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
@@ -83,14 +91,18 @@ class TargetMarkerView @JvmOverloads constructor(
         val outerRadius = min(width, height) / 2f
         val innerRadius = outerRadius * 0.45f
         val crosshairRadius = outerRadius * 0.72f
+        val centerOuterRadius = outerRadius * 0.13f
+        val centerInnerRadius = outerRadius * 0.07f
 
         canvas.drawCircle(centerX, centerY, outerRadius, outerPaint)
         canvas.drawCircle(centerX, centerY, innerRadius, ringPaint)
         canvas.drawLine(centerX - crosshairRadius, centerY, centerX + crosshairRadius, centerY, crosshairPaint)
         canvas.drawLine(centerX, centerY - crosshairRadius, centerX, centerY + crosshairRadius, crosshairPaint)
+        canvas.drawCircle(centerX, centerY, centerOuterRadius, centerOuterPaint)
+        canvas.drawCircle(centerX, centerY, centerInnerRadius, centerInnerPaint)
 
         if (label.isNotEmpty()) {
-            val baseline = centerY - ((textPaint.descent() + textPaint.ascent()) / 2f)
+            val baseline = centerY + outerRadius * 0.46f - ((textPaint.descent() + textPaint.ascent()) / 2f)
             canvas.drawText(label, centerX, baseline, textPaint)
         }
     }

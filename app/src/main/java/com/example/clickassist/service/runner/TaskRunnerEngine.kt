@@ -10,11 +10,13 @@ import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.domain.repository.TaskRepository
 import com.example.clickassist.service.accessibility.MyAccessibilityService
+import com.example.clickassist.service.overlay.MarkerGeometrySnapshot
 import com.example.clickassist.service.overlay.OverlayController
 import com.example.clickassist.service.overlay.OverlayMarkerModel
 import com.example.clickassist.service.overlay.OverlayPanelSpec
 import com.example.clickassist.service.overlay.OverlayPanelType
 import com.example.clickassist.service.overlay.OverlaySchemeItem
+import com.example.clickassist.service.overlay.ScreenGeometrySnapshot
 import com.example.clickassist.service.overlay.OverlayStepEditorDraft
 import com.example.clickassist.service.overlay.OverlayMarkerRole
 import com.example.clickassist.service.overlay.OverlayWaitStepItem
@@ -69,12 +71,12 @@ class TaskRunnerEngine(
         overlayController.bindToolbarCallbacks(
             OverlayToolbarCallbacks(
                 onStartRequested = ::handleToolbarStartRequested,
-                onPauseRequested = ::pause,
-                onStopRequested = ::stop,
+                onPauseRequested = ::handleToolbarPauseRequested,
+                onStopRequested = ::handleToolbarStopRequested,
                 onAddNodeRequested = ::handleToolbarAddNodeRequested,
-                onDeleteSelectedRequested = ::deleteSelectedNode,
+                onDeleteSelectedRequested = ::handleToolbarDeleteSelectedRequested,
                 onSettingsRequested = ::handleToolbarSettingsRequested,
-                onTargetToggleRequested = ::toggleTargetVisibility,
+                onTargetToggleRequested = ::handleToolbarTargetToggleRequested,
             ),
         )
         overlayController.bindHandleExpandCallback(::restoreToolbarFromHandle)
@@ -100,9 +102,17 @@ class TaskRunnerEngine(
 
     fun startActiveTask() {
         when (_runnerState.value) {
-            RunnerState.PAUSED -> resume()
-            RunnerState.RUNNING, RunnerState.STOPPING -> Unit
+            RunnerState.PAUSED -> {
+                Log.i(TAG, "startActiveTask delegatedTo=resume taskId=$activeTaskId")
+                resume()
+            }
+
+            RunnerState.RUNNING, RunnerState.STOPPING -> {
+                Log.i(TAG, "startActiveTask ignored taskId=$activeTaskId state=${_runnerState.value}")
+            }
+
             RunnerState.IDLE, RunnerState.COMPLETED, RunnerState.ERROR -> {
+                Log.i(TAG, "startActiveTask requested taskId=$activeTaskId state=${_runnerState.value}")
                 engineScope.launch { startActiveTaskInternal() }
             }
         }
@@ -115,6 +125,8 @@ class TaskRunnerEngine(
                 Log.i(TAG, "pause requested taskId=$activeTaskId")
                 publishState(RunnerState.PAUSED)
             }
+        } else {
+            Log.i(TAG, "pause ignored taskId=$activeTaskId state=${_runnerState.value}")
         }
     }
 
@@ -136,7 +148,9 @@ class TaskRunnerEngine(
             clearPlacementState(syncOverlay = true)
             Log.i(TAG, "stop requested taskId=$activeTaskId runnerState=${_runnerState.value}")
             when (_runnerState.value) {
-                RunnerState.IDLE -> Unit
+                RunnerState.IDLE -> {
+                    Log.i(TAG, "stop ignored reason=already_idle")
+                }
                 RunnerState.RUNNING, RunnerState.PAUSED, RunnerState.STOPPING -> {
                     stopRunnerJobAndResetState(clearError = true)
                 }
@@ -182,6 +196,22 @@ class TaskRunnerEngine(
         startActiveTask()
     }
 
+    private fun handleToolbarPauseRequested() {
+        Log.i(
+            ACTION_TAG,
+            "toolbar pause clicked taskId=$activeTaskId state=${_runnerState.value} floatingMode=${_overlaySessionState.value.isFloatingModeEnabled}",
+        )
+        pause()
+    }
+
+    private fun handleToolbarStopRequested() {
+        Log.i(
+            ACTION_TAG,
+            "toolbar stop clicked taskId=$activeTaskId state=${_runnerState.value} floatingMode=${_overlaySessionState.value.isFloatingModeEnabled}",
+        )
+        stop()
+    }
+
     private fun handleToolbarAddNodeRequested() {
         Log.i(
             ACTION_TAG,
@@ -196,6 +226,22 @@ class TaskRunnerEngine(
             "toolbar settings clicked taskId=$activeTaskId hidden=${_overlaySessionState.value.isToolbarHidden}",
         )
         togglePanel(OverlayPanelType.SETTINGS)
+    }
+
+    private fun handleToolbarDeleteSelectedRequested() {
+        Log.i(
+            ACTION_TAG,
+            "toolbar delete selected clicked taskId=$activeTaskId selectedStepId=$selectedStepId",
+        )
+        deleteSelectedNode()
+    }
+
+    private fun handleToolbarTargetToggleRequested() {
+        Log.i(
+            ACTION_TAG,
+            "toolbar target toggle clicked taskId=$activeTaskId targetVisible=${_overlaySessionState.value.isTargetVisible}",
+        )
+        toggleTargetVisibility()
     }
 
     private fun handleBackgroundTap(
@@ -237,13 +283,17 @@ class TaskRunnerEngine(
     }
 
     private suspend fun startActiveTaskInternal() {
-        Log.i(TAG, "startActiveTaskInternal")
+        Log.i(TAG, "startActiveTaskInternal activeTaskId=$activeTaskId")
         clearPlacementState(syncOverlay = true)
         val taskContext = resolveActiveTaskContext(
             source = "startActiveTask",
             requireService = true,
             validateStart = true,
         ) ?: return
+        Log.i(
+            TAG,
+            "startActiveTaskInternal resolved executionTaskId=${taskContext.taskWithSteps.task.id} stepCount=${taskContext.taskWithSteps.steps.size} selectedStepId=$selectedStepId",
+        )
 
         publishError(null)
         publishStatusMessage(R.string.overlay_status_starting)
@@ -279,6 +329,10 @@ class TaskRunnerEngine(
     private suspend fun startPlacementMode(
         actionType: ActionType,
     ) {
+        Log.i(
+            ACTION_TAG,
+            "startPlacementMode actionType=$actionType taskId=$activeTaskId floatingMode=${_overlaySessionState.value.isFloatingModeEnabled}",
+        )
         if (!_overlaySessionState.value.isFloatingModeEnabled || activeTaskId == null) {
             publishError(RunnerError.NoTaskSelected, true)
             return
@@ -305,6 +359,7 @@ class TaskRunnerEngine(
             ),
         )
         syncOverlayTargets(task)
+        Log.i(ACTION_TAG, "startPlacementMode armed actionType=$actionType taskId=$taskId")
     }
 
     private suspend fun handleBackgroundTapInternal(
@@ -419,10 +474,20 @@ class TaskRunnerEngine(
         clearPlacementState(syncOverlay = true)
         val taskId = activeTaskId ?: return
         val task = taskRepository.getTask(taskId) ?: return
-        val selected = task.steps.firstOrNull { it.id == selectedStepId } ?: return
-        if (selected.actionTypeEnum() == ActionType.WAIT) {
+        val selected = task.steps.firstOrNull { it.id == selectedStepId } ?: run {
+            Log.w(ACTION_TAG, "deleteSelectedNode ignored reason=no_selected_step taskId=$taskId")
+            publishStatusMessage(R.string.overlay_status_toolbar_action_unavailable)
             return
         }
+        if (selected.actionTypeEnum() == ActionType.WAIT) {
+            Log.w(ACTION_TAG, "deleteSelectedNode ignored reason=wait_step stepId=${selected.id}")
+            publishStatusMessage(R.string.overlay_status_toolbar_action_unavailable)
+            return
+        }
+        Log.i(
+            ACTION_TAG,
+            "deleteSelectedNode proceed taskId=$taskId stepId=${selected.id} actionType=${selected.actionTypeEnum()}",
+        )
         deleteStep(selected.id)
     }
 
@@ -435,12 +500,17 @@ class TaskRunnerEngine(
     private suspend fun togglePanelInternal(
         panelType: OverlayPanelType,
     ) {
+        Log.i(
+            ACTION_TAG,
+            "togglePanel requested panelType=$panelType activePanelType=$activePanelType taskId=$activeTaskId",
+        )
         if (!_overlaySessionState.value.isFloatingModeEnabled || activeTaskId == null) {
             publishError(RunnerError.NoTaskSelected, true)
             return
         }
         clearPlacementState(syncOverlay = true)
         if (activePanelType == panelType) {
+            Log.i(ACTION_TAG, "togglePanel closing existing panelType=$panelType")
             closeActivePanelInternal()
             return
         }
@@ -450,6 +520,7 @@ class TaskRunnerEngine(
     }
 
     private suspend fun closeActivePanelInternal() {
+        Log.i(ACTION_TAG, "closeActivePanel currentPanel=$activePanelType taskId=$activeTaskId")
         activePanelType = null
         activePanelMessageRes = null
         overlayController.hidePanel()
@@ -681,6 +752,7 @@ class TaskRunnerEngine(
     ): Boolean {
         val targetVisible =
             _overlaySessionState.value.isTargetVisible && overlayController.isTargetVisible()
+        val screenGeometry = overlayController.currentScreenGeometry()
         if (targetVisible) {
             Log.i(
                 TAG,
@@ -692,34 +764,58 @@ class TaskRunnerEngine(
         return try {
             val dispatched = when (step.actionTypeEnum()) {
                 ActionType.TAP -> {
-                    val point = requireStepPoint(step, isLongPress = false) ?: return false
+                    val storedPoint = requireStepPoint(step, isLongPress = false) ?: return false
+                    val markerGeometry = if (targetVisible) {
+                        overlayController.currentMarkerGeometry(markerId(step.id, OverlayMarkerRole.PRIMARY))
+                    } else {
+                        null
+                    }
+                    val finalPoint = storedPoint
                     Log.i(
                         TAG,
-                        "$source dispatch TAP taskId=$taskId stepId=${step.id} x=${point.x} y=${point.y} durationMs=${step.durationMs}"
+                        "$source dispatch TAP taskId=$taskId stepId=${step.id} storedPoint=$storedPoint markerGeometry=${markerGeometry.formatForLog()} finalPoint=$finalPoint source=stored_point screen=${screenGeometry.formatForLog()} durationMs=${step.durationMs}",
                     )
-                    service.dispatchTap(point.x, point.y, step.durationMs)
+                    service.dispatchTap(finalPoint.x, finalPoint.y, step.durationMs)
                 }
 
                 ActionType.LONG_PRESS -> {
-                    val point = requireStepPoint(step, isLongPress = true) ?: return false
+                    val storedPoint = requireStepPoint(step, isLongPress = true) ?: return false
+                    val markerGeometry = if (targetVisible) {
+                        overlayController.currentMarkerGeometry(markerId(step.id, OverlayMarkerRole.PRIMARY))
+                    } else {
+                        null
+                    }
+                    val finalPoint = storedPoint
                     Log.i(
                         TAG,
-                        "$source dispatch LONG_PRESS taskId=$taskId stepId=${step.id} x=${point.x} y=${point.y} durationMs=${step.durationMs}"
+                        "$source dispatch LONG_PRESS taskId=$taskId stepId=${step.id} storedPoint=$storedPoint markerGeometry=${markerGeometry.formatForLog()} finalPoint=$finalPoint source=stored_point screen=${screenGeometry.formatForLog()} durationMs=${step.durationMs}",
                     )
-                    service.dispatchLongPress(point.x, point.y, step.durationMs)
+                    service.dispatchLongPress(finalPoint.x, finalPoint.y, step.durationMs)
                 }
 
                 ActionType.SWIPE -> {
                     val swipe = requireSwipePoints(step) ?: return false
+                    val startGeometry = if (targetVisible) {
+                        overlayController.currentMarkerGeometry(markerId(step.id, OverlayMarkerRole.START))
+                    } else {
+                        null
+                    }
+                    val endGeometry = if (targetVisible) {
+                        overlayController.currentMarkerGeometry(markerId(step.id, OverlayMarkerRole.END))
+                    } else {
+                        null
+                    }
+                    val finalStart = swipe.first
+                    val finalEnd = swipe.second
                     Log.i(
                         TAG,
-                        "$source dispatch SWIPE taskId=$taskId stepId=${step.id} start=${swipe.first} end=${swipe.second} durationMs=${step.durationMs}"
+                        "$source dispatch SWIPE taskId=$taskId stepId=${step.id} storedStart=${swipe.first} storedEnd=${swipe.second} markerStartGeometry=${startGeometry.formatForLog()} markerEndGeometry=${endGeometry.formatForLog()} finalStart=$finalStart finalEnd=$finalEnd startSource=stored_start endSource=stored_end screen=${screenGeometry.formatForLog()} durationMs=${step.durationMs}",
                     )
                     service.dispatchSwipe(
-                        swipe.first.x,
-                        swipe.first.y,
-                        swipe.second.x,
-                        swipe.second.y,
+                        finalStart.x,
+                        finalStart.y,
+                        finalEnd.x,
+                        finalEnd.y,
                         step.durationMs
                     )
                 }
@@ -846,6 +942,10 @@ class TaskRunnerEngine(
         val normalizedTask = normalizeTaskForRuntime(taskWithSteps)
         val visible = !session.isTargetVisible
         val markers = buildMarkerModels(normalizedTask)
+        Log.i(
+            ACTION_TAG,
+            "toggleTargetVisibility resolved taskId=$taskId nextVisible=$visible markers=${markers.size}",
+        )
         if (visible && markers.isEmpty()) {
             publishError(RunnerError.NoExecutableSteps, true)
             return
@@ -872,6 +972,7 @@ class TaskRunnerEngine(
                 statusMessageRes = if (visible) R.string.overlay_status_target_visible else R.string.overlay_status_target_hidden,
             ),
         )
+        Log.i(ACTION_TAG, "toggleTargetVisibility success taskId=$taskId nextVisible=$visible")
     }
 
     private fun handleMarkerChanged(
@@ -898,6 +999,11 @@ class TaskRunnerEngine(
         point: ScreenPoint,
     ) {
         val markerMeta = parseMarkerId(markerId) ?: return
+        val geometry = overlayController.currentMarkerGeometry(markerId)
+        Log.i(
+            TAG,
+            "handleMarkerDragEnd markerId=$markerId stepId=${markerMeta.stepId} dragReportedPoint=$point markerGeometry=${geometry.formatForLog()} savedPoint=$point",
+        )
         handleMarkerChanged(markerId, point)
         engineScope.launch {
             persistStepGeometry(markerMeta.stepId)
@@ -934,6 +1040,7 @@ class TaskRunnerEngine(
                 ),
             )
             syncActivePanel(normalized)
+            Log.i(TAG, "marker selection synced markerId=$markerId taskId=$taskId selectedStepId=$selectedStepId")
         }
     }
 
@@ -942,10 +1049,15 @@ class TaskRunnerEngine(
     ) {
         val shouldShowMarkers = _overlaySessionState.value.isTargetVisible ||
                 placementMode != OverlayPlacementMode.NONE
-        overlayController.updateTargetLayer(
-            markers = buildMarkerModels(taskWithSteps),
+        val markers = buildMarkerModels(taskWithSteps)
+        val updated = overlayController.updateTargetLayer(
+            markers = markers,
             isVisible = shouldShowMarkers,
             placementMode = placementMode,
+        )
+        Log.i(
+            TAG,
+            "syncOverlayTargets taskId=${taskWithSteps.task.id} shouldShowMarkers=$shouldShowMarkers updated=$updated markerCount=${markers.size}",
         )
     }
 
@@ -1055,12 +1167,17 @@ class TaskRunnerEngine(
     ) {
         val session = _overlaySessionState.value
         if (!session.isFloatingModeEnabled) return
+        Log.i(TAG, "publishStatusMessage messageRes=$messageRes taskId=${session.activeTaskId}")
         publishOverlaySessionState(session.copy(statusMessageRes = messageRes))
     }
 
     private fun publishOverlaySessionState(
         state: OverlaySessionState,
     ) {
+        Log.i(
+            TAG,
+            "publishOverlaySessionState taskId=${state.activeTaskId} taskName=${state.activeTaskName} targetVisible=${state.isTargetVisible} panel=${state.activePanelType} hidden=${state.isToolbarHidden} selectedStepOrder=${state.selectedStepOrder}",
+        )
         _overlaySessionState.value = state
         syncToolbarStateAsync()
     }
@@ -1071,6 +1188,8 @@ class TaskRunnerEngine(
         engineScope.launch {
             overlayController.updateToolbarState(
                 createToolbarUiState(
+                    activeTaskId = session.activeTaskId,
+                    activeTaskName = session.activeTaskName,
                     targetVisible = session.isTargetVisible,
                     selectedStepOrder = session.selectedStepOrder,
                     selectedStepActionType = session.selectedStepActionType,
@@ -1084,6 +1203,8 @@ class TaskRunnerEngine(
 
     private fun createToolbarUiState(
         normalizedTask: TaskWithSteps? = null,
+        activeTaskId: Long? = normalizedTask?.task?.id ?: _overlaySessionState.value.activeTaskId,
+        activeTaskName: String? = normalizedTask?.task?.name ?: _overlaySessionState.value.activeTaskName,
         targetVisible: Boolean = _overlaySessionState.value.isTargetVisible,
         selectedStepOrder: Int? = normalizedTask?.let { resolveSelectedStepOrder(it) }
             ?: _overlaySessionState.value.selectedStepOrder,
@@ -1097,6 +1218,8 @@ class TaskRunnerEngine(
         return OverlayToolbarUiState(
             runnerState = _runnerState.value,
             isTargetVisible = targetVisible,
+            activeTaskId = activeTaskId,
+            activeTaskName = activeTaskName,
             selectedStepOrder = selectedStepOrder,
             selectedStepActionType = selectedStepActionType,
             canDeleteSelected = canDeleteSelected,
@@ -1398,6 +1521,18 @@ class TaskRunnerEngine(
         return ScreenPoint(startX, startY) to ScreenPoint(endX, endY)
     }
 
+    private fun MarkerGeometrySnapshot?.formatForLog(): String {
+        return if (this == null) {
+            "null"
+        } else {
+            "left=$left top=$top width=$width height=$height center=($centerX,$centerY)"
+        }
+    }
+
+    private fun ScreenGeometrySnapshot.formatForLog(): String {
+        return "size=${screenWidth}x${screenHeight} windowBounds=$windowBounds origin=($originOnScreenX,$originOnScreenY) insets(top=$statusBarInsetTop,bottom=$navigationBarInsetBottom,left=$navigationBarInsetLeft,right=$navigationBarInsetRight)"
+    }
+
     private fun persistVisibleStepGeometriesAsync(
         taskWithSteps: TaskWithSteps,
     ) {
@@ -1466,6 +1601,10 @@ class TaskRunnerEngine(
             ActionType.LONG_PRESS,
                 -> {
                 val point = geometry.start ?: return
+                Log.i(
+                    TAG,
+                    "persistStepGeometry point taskId=$taskId stepId=$stepId actionType=${step.actionTypeEnum()} savedCenter=(${point.x},${point.y})",
+                )
                 runCatching {
                     taskRepository.updateTapStepPosition(taskId, stepId, point.x, point.y)
                 }.onFailure { throwable ->
@@ -1476,6 +1615,10 @@ class TaskRunnerEngine(
             ActionType.SWIPE -> {
                 val start = geometry.start ?: return
                 val end = geometry.end ?: return
+                Log.i(
+                    TAG,
+                    "persistStepGeometry swipe taskId=$taskId stepId=$stepId savedStart=(${start.x},${start.y}) savedEnd=(${end.x},${end.y})",
+                )
                 runCatching {
                     taskRepository.updateSwipeStepPosition(
                         taskId,
@@ -1500,6 +1643,11 @@ class TaskRunnerEngine(
         @StringRes statusMessageRes: Int?,
         initialTargetVisible: Boolean?,
     ): TaskWithSteps? {
+        val previousTaskId = activeTaskId
+        Log.i(
+            TAG,
+            "loadTaskIntoFloatingMode request taskId=$taskId previousTaskId=$previousTaskId preferredSelectionHint=$preferredSelectionHint initialTargetVisible=$initialTargetVisible panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
+        )
         val taskWithSteps = taskRepository.getTask(taskId) ?: run {
             publishError(RunnerError.TaskNotFound(taskId), true)
             return null
@@ -1513,6 +1661,10 @@ class TaskRunnerEngine(
             null -> _overlaySessionState.value.isTargetVisible && markers.isNotEmpty()
             else -> initialTargetVisible && markers.isNotEmpty()
         }
+        Log.i(
+            TAG,
+            "loadTaskIntoFloatingMode resolved taskId=${normalizedTask.task.id} taskName=${normalizedTask.task.name} stepCount=${normalizedTask.steps.size} selectedStepId=$selectedStepId markerCount=${markers.size} targetVisible=$targetVisible",
+        )
 
         val shown = if (!_overlaySessionState.value.isFloatingModeEnabled) {
             overlayController.showFloatingMode(
@@ -1555,6 +1707,10 @@ class TaskRunnerEngine(
             )
             return null
         }
+        Log.i(
+            TAG,
+            "loadTaskIntoFloatingMode shown taskId=${normalizedTask.task.id} taskName=${normalizedTask.task.name} markerCount=${markers.size}",
+        )
 
         publishOverlaySessionState(
             createOverlaySessionState(
@@ -1564,6 +1720,10 @@ class TaskRunnerEngine(
             ),
         )
         syncActivePanel(normalizedTask)
+        Log.i(
+            TAG,
+            "loadTaskIntoFloatingMode complete taskId=${normalizedTask.task.id} selectedStepId=$selectedStepId panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
+        )
         return normalizedTask
     }
 
@@ -1571,6 +1731,10 @@ class TaskRunnerEngine(
         taskWithSteps: TaskWithSteps? = null,
     ) {
         val panelType = activePanelType
+        Log.i(
+            ACTION_TAG,
+            "syncActivePanel panelType=$panelType taskId=$activeTaskId floatingMode=${_overlaySessionState.value.isFloatingModeEnabled}",
+        )
         if (!_overlaySessionState.value.isFloatingModeEnabled || panelType == null) {
             overlayController.hidePanel()
             return
@@ -1593,6 +1757,7 @@ class TaskRunnerEngine(
             spec = spec,
             onCloseRequested = ::closeActivePanel,
         )
+        Log.i(ACTION_TAG, "syncActivePanel result panelType=$panelType shown=$shown taskId=$taskId")
         if (!shown) {
             publishError(RunnerError.OverlayPermissionDenied, true)
         }
@@ -1648,6 +1813,10 @@ class TaskRunnerEngine(
                         }
                     },
                     onSchemeSelected = { taskId ->
+                        Log.i(
+                            SCHEME_TAG,
+                            "scheme selection callback taskId=$taskId currentTaskId=${taskWithSteps.task.id}",
+                        )
                         engineScope.launch { switchTaskScheme(taskId) }
                     },
                     onWaitStepSelected = { stepId ->
@@ -1708,6 +1877,7 @@ class TaskRunnerEngine(
     private suspend fun deleteStep(
         stepId: Long,
     ) {
+        Log.i(ACTION_TAG, "deleteStep requested taskId=$activeTaskId stepId=$stepId")
         mutateCurrentTaskStructure(
             successMessageRes = R.string.overlay_panel_save_success,
             selectionHintProvider = { currentSteps ->
@@ -1946,22 +2116,43 @@ class TaskRunnerEngine(
     private suspend fun switchTaskScheme(
         taskId: Long,
     ) {
+        val previousTaskId = activeTaskId
+        Log.i(
+            SCHEME_TAG,
+            "scheme selection requested previousTaskId=$previousTaskId nextTaskId=$taskId panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
+        )
         if (taskId == activeTaskId) {
-            setActivePanelMessage(R.string.overlay_panel_scheme_current)
+            Log.i(SCHEME_TAG, "scheme selection ignored reason=already_current taskId=$taskId")
+            setActivePanelMessage(R.string.overlay_panel_scheme_selected)
             return
         }
+        clearPlacementState(syncOverlay = false)
+        pendingSwipeStartPoint = null
         activePanelMessageRes = R.string.overlay_panel_scheme_switched
-        stopRunnerForWorkbenchChange()
+        val snapshot = stopRunnerForWorkbenchChange()
+        Log.i(
+            SCHEME_TAG,
+            "scheme selection stopped runner previousTaskId=$previousTaskId wasRunning=${snapshot.wasRunning} wasPaused=${snapshot.wasPaused}",
+        )
         runtimeStepGeometryMap.clear()
-        loadTaskIntoFloatingMode(
+        selectedStepId = null
+        val loadedTask = loadTaskIntoFloatingMode(
             taskId = taskId,
             preferredSelectionHint = null,
             statusMessageRes = R.string.overlay_panel_scheme_switched,
             initialTargetVisible = _overlaySessionState.value.isTargetVisible,
         )
+        if (loadedTask == null) {
+            Log.e(SCHEME_TAG, "scheme selection failed taskId=$taskId reason=load_failed")
+            return
+        }
         publishState(RunnerState.IDLE)
         publishStatusMessage(R.string.overlay_panel_scheme_switched)
         publishError(null)
+        Log.i(
+            SCHEME_TAG,
+            "scheme selection applied previousTaskId=$previousTaskId nextTaskId=${loadedTask.task.id} stepCount=${loadedTask.steps.size} selectedStepId=$selectedStepId markerCount=${buildMarkerModels(loadedTask).size}",
+        )
     }
 
     private suspend fun mutateCurrentTaskStructure(
@@ -1977,6 +2168,10 @@ class TaskRunnerEngine(
         val updatedSteps = transform(current)
             .sortedBy { it.orderIndex }
             .mapIndexed { index, step -> step.copy(orderIndex = index) }
+        Log.i(
+            ACTION_TAG,
+            "mutateCurrentTaskStructure taskId=$taskId previousStepCount=${current.steps.size} nextStepCount=${updatedSteps.size}",
+        )
         persistWorkbenchTask(
             originalTask = current,
             updatedTask = current.task.copy(updatedAt = System.currentTimeMillis()),
@@ -1996,6 +2191,10 @@ class TaskRunnerEngine(
         autoRestartIfRunning: Boolean,
     ) {
         val runnerSnapshot = stopRunnerForWorkbenchChange()
+        Log.i(
+            TAG,
+            "persistWorkbenchTask taskId=${originalTask.task.id} updatedTaskId=${updatedTask.id} stepCount=${updatedSteps.size} autoRestartIfRunning=$autoRestartIfRunning wasRunning=${runnerSnapshot.wasRunning} wasPaused=${runnerSnapshot.wasPaused}",
+        )
         try {
             val savedTaskId = taskRepository.saveTask(updatedTask, updatedSteps)
             activePanelMessageRes = successMessageRes
@@ -2023,6 +2222,10 @@ class TaskRunnerEngine(
                 }
             }
             publishError(null)
+            Log.i(
+                TAG,
+                "persistWorkbenchTask success originalTaskId=${originalTask.task.id} savedTaskId=$savedTaskId stepCount=${loadedTask.steps.size}",
+            )
         } catch (throwable: Throwable) {
             Log.e(TAG, "persistWorkbenchTask failed taskId=${originalTask.task.id}", throwable)
             activePanelMessageRes = R.string.overlay_panel_save_failed
@@ -2375,6 +2578,7 @@ class TaskRunnerEngine(
         const val PREVIEW_STEP_ID = -1L
         const val PREVIEW_SWIPE_START_MARKER_ID = "preview:swipe:start"
         const val TAG = "TaskRunnerEngine"
-        const val ACTION_TAG = "TaskRunnerAction"
+        const val ACTION_TAG = "OverlayAction"
+        const val SCHEME_TAG = "SchemeSelection"
     }
 }

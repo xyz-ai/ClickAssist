@@ -46,6 +46,11 @@ class OverlayController(
 
     fun currentMarkerPoint(markerId: String): ScreenPoint? = targetController.currentMarkerPoint(markerId)
 
+    fun currentMarkerGeometry(markerId: String): MarkerGeometrySnapshot? =
+        targetController.currentMarkerGeometry(markerId)
+
+    fun currentScreenGeometry(): ScreenGeometrySnapshot = targetController.currentScreenGeometry()
+
     fun resolveInitialPoint(
         preferredX: Int?,
         preferredY: Int?,
@@ -56,12 +61,14 @@ class OverlayController(
     fun bindToolbarCallbacks(
         callbacks: OverlayToolbarCallbacks,
     ) {
+        Log.i(TAG, "bindToolbarCallbacks")
         toolbarCallbacks = callbacks
     }
 
     fun bindHandleExpandCallback(
         callback: () -> Unit,
     ) {
+        Log.i(TAG, "bindHandleExpandCallback")
         handleExpandCallback = callback
     }
 
@@ -76,9 +83,14 @@ class OverlayController(
         onMarkerSelected: (String) -> Unit,
     ): Boolean {
         if (!hasPermission()) {
+            Log.e(TAG, "showFloatingMode failed reason=overlay_permission_denied")
             return false
         }
         lastToolbarUiState = toolbarUiState
+        Log.i(
+            TAG,
+            "showFloatingMode markers=${initialMarkers.size} targetVisible=$targetVisible placementMode=$placementMode taskId=${toolbarUiState.activeTaskId} taskName=${toolbarUiState.activeTaskName}",
+        )
 
         onBackgroundTapCallback = onBackgroundTap
         onMarkerChangedCallback = onMarkerChanged
@@ -95,6 +107,7 @@ class OverlayController(
             onMarkerSelected = onMarkerSelected,
         )
         if (!layerShown) {
+            Log.e(TAG, "showFloatingMode failed reason=target_layer_not_shown")
             return false
         }
 
@@ -105,10 +118,12 @@ class OverlayController(
         )
         if (!toolbarShown) {
             targetController.hideLayer(clearPoints = false)
+            Log.e(TAG, "showFloatingMode failed reason=toolbar_not_shown")
             return false
         }
 
         syncTouchExclusionRects()
+        Log.i(TAG, "showFloatingMode success")
 
         return true
     }
@@ -117,6 +132,10 @@ class OverlayController(
         uiState: OverlayToolbarUiState,
     ) {
         lastToolbarUiState = uiState
+        Log.i(
+            TAG,
+            "updateToolbarState taskId=${uiState.activeTaskId} taskName=${uiState.activeTaskName} runnerState=${uiState.runnerState} targetVisible=${uiState.isTargetVisible}",
+        )
         toolbarController.updateState(uiState)
         syncTouchExclusionRects()
     }
@@ -125,12 +144,15 @@ class OverlayController(
         spec: OverlayPanelSpec,
         onCloseRequested: () -> Unit,
     ): Boolean {
+        Log.i(TAG, "showPanel type=${spec.type}")
         val shown = panelController.showPanel(spec, onCloseRequested)
+        Log.i(TAG, "showPanel result type=${spec.type} success=$shown")
         syncTouchExclusionRects()
         return shown
     }
 
     suspend fun hidePanel() {
+        Log.i(TAG, "hidePanel")
         panelController.hidePanel()
         syncTouchExclusionRects()
     }
@@ -140,34 +162,50 @@ class OverlayController(
         isVisible: Boolean,
         placementMode: OverlayPlacementMode,
     ): Boolean {
-        return targetController.updateLayer(
+        Log.i(
+            TAG,
+            "updateTargetLayer markers=${markers.size} visible=$isVisible placementMode=$placementMode",
+        )
+        val updated = targetController.updateLayer(
             markers = markers,
             areMarkersVisible = isVisible,
             placementMode = placementMode,
         )
+        Log.i(TAG, "updateTargetLayer result success=$updated")
+        return updated
     }
 
     suspend fun setTargetVisibility(
         isVisible: Boolean,
     ): Boolean {
-        return targetController.setMarkerVisibility(isVisible)
+        Log.i(TAG, "setTargetVisibility visible=$isVisible")
+        val updated = targetController.setMarkerVisibility(isVisible)
+        Log.i(TAG, "setTargetVisibility result success=$updated")
+        return updated
     }
 
     suspend fun setPlacementMode(
         placementMode: OverlayPlacementMode,
     ): Boolean {
-        return targetController.setPlacementMode(placementMode)
+        Log.i(TAG, "setPlacementMode placementMode=$placementMode")
+        val updated = targetController.setPlacementMode(placementMode)
+        Log.i(TAG, "setPlacementMode result success=$updated")
+        return updated
     }
 
     suspend fun setTargetTouchEnabled(
         enabled: Boolean,
     ): Boolean {
-        return targetController.setTouchEnabled(enabled)
+        Log.i(TAG, "setTargetTouchEnabled enabled=$enabled")
+        val updated = targetController.setTouchEnabled(enabled)
+        Log.i(TAG, "setTargetTouchEnabled result success=$updated")
+        return updated
     }
 
     suspend fun hideFloatingMode(
         clearTargetPoint: Boolean = true,
     ) {
+        Log.i(TAG, "hideFloatingMode clearTargetPoint=$clearTargetPoint")
         panelController.hidePanel()
         toolbarController.hide()
         handleController.hide()
@@ -192,6 +230,7 @@ class OverlayController(
         }
         toolbarController.hide()
         syncTouchExclusionRects()
+        Log.i(TAG, "hideToolbarToHandle success")
         return true
     }
 
@@ -207,6 +246,7 @@ class OverlayController(
         }
         handleController.hide()
         syncTouchExclusionRects()
+        Log.i(TAG, "showToolbarFromHandle success")
         return true
     }
 

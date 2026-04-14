@@ -15,17 +15,18 @@ import kotlin.math.roundToInt
 class OverlayTargetLayerView(
     context: Context,
 ) : View(context) {
+    private val density = resources.displayMetrics.density
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#60A5FA")
         style = Paint.Style.STROKE
-        strokeWidth = 6f * resources.displayMetrics.density
+        strokeWidth = 10f * density
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val selectedLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#F59E0B")
         style = Paint.Style.STROKE
-        strokeWidth = 8f * resources.displayMetrics.density
+        strokeWidth = 14f * density
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
@@ -37,6 +38,8 @@ class OverlayTargetLayerView(
     private var touchEnabled: Boolean = true
     private var touchExclusionRects: List<Rect> = emptyList()
     private var backgroundTapCallback: ((ScreenPoint) -> Unit)? = null
+    private var originOnScreenX: Int = 0
+    private var originOnScreenY: Int = 0
     private var downX = 0f
     private var downY = 0f
     private var dragging = false
@@ -51,6 +54,8 @@ class OverlayTargetLayerView(
         placementMode: OverlayPlacementMode,
         touchEnabled: Boolean,
         touchExclusionRects: List<Rect>,
+        originOnScreenX: Int,
+        originOnScreenY: Int,
         onBackgroundTap: (ScreenPoint) -> Unit,
     ) {
         this.markers = markers
@@ -58,6 +63,8 @@ class OverlayTargetLayerView(
         this.placementMode = placementMode
         this.touchEnabled = touchEnabled
         this.touchExclusionRects = touchExclusionRects.map(::Rect)
+        this.originOnScreenX = originOnScreenX
+        this.originOnScreenY = originOnScreenY
         backgroundTapCallback = onBackgroundTap
         invalidate()
     }
@@ -68,6 +75,7 @@ class OverlayTargetLayerView(
             return
         }
 
+        val markerMap = markers.associateBy { it.markerId }
         markers
             .filter { it.connectedMarkerId != null }
             .sortedBy { it.markerId }
@@ -76,17 +84,21 @@ class OverlayTargetLayerView(
                 if (model.markerId > otherId) {
                     return@forEach
                 }
-                val other = markers.firstOrNull { it.markerId == otherId } ?: return@forEach
+                val other = markerMap[otherId] ?: return@forEach
                 val paint = if (model.isSelected || other.isSelected) {
                     selectedLinePaint
                 } else {
                     linePaint
                 }
+                val startX = (model.point.x - originOnScreenX).toFloat()
+                val startY = (model.point.y - originOnScreenY).toFloat()
+                val endX = (other.point.x - originOnScreenX).toFloat()
+                val endY = (other.point.y - originOnScreenY).toFloat()
                 canvas.drawLine(
-                    model.point.x.toFloat(),
-                    model.point.y.toFloat(),
-                    other.point.x.toFloat(),
-                    other.point.y.toFloat(),
+                    startX,
+                    startY,
+                    endX,
+                    endY,
                     paint,
                 )
             }
@@ -98,7 +110,9 @@ class OverlayTargetLayerView(
         }
         val touchX = event.x.roundToInt()
         val touchY = event.y.roundToInt()
-        if (touchExclusionRects.any { it.contains(touchX, touchY) }) {
+        val absoluteTouchX = touchX + originOnScreenX
+        val absoluteTouchY = touchY + originOnScreenY
+        if (touchExclusionRects.any { it.contains(absoluteTouchX, absoluteTouchY) }) {
             return false
         }
         when (event.actionMasked) {
@@ -120,8 +134,8 @@ class OverlayTargetLayerView(
                 if (!dragging) {
                     backgroundTapCallback?.invoke(
                         ScreenPoint(
-                            x = event.x.roundToInt(),
-                            y = event.y.roundToInt(),
+                            x = event.x.roundToInt() + originOnScreenX,
+                            y = event.y.roundToInt() + originOnScreenY,
                         ),
                     )
                 }

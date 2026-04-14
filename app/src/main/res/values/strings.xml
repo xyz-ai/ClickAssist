@@ -2,7 +2,7 @@
     <string name="app_name">ClickAssist</string>
     <string name="overlay_status_toolbar_hidden">工具栏已隐藏</string>
     <string name="overlay_status_toolbar_expanded">工具栏已展开</string>
-    <string name="overlay_panel_scheme_selected">已选择该方案</string>
+    <string name="overlay_panel_scheme_selected">方案已选中</string>
     <string name="common_back">返回</string>
     <string name="common_save">保存</string>
     <string name="common_cancel">取消</string>
@@ -16,10 +16,12 @@
     <string name="common_delete">删除</string>
     <string name="common_move_up">上移</string>
     <string name="common_move_down">下移</string>
-    <string name="overlay_action_show_toolbar">显示工具栏</string>
+    <string name="overlay_action_show_toolbar">展开工具栏</string>
     <string name="overlay_action_hide_toolbar">隐藏工具栏</string>
     <string name="default_task_name">未命名任务</string>
     <string name="overlay_status_toolbar_action_unavailable">当前操作不可用</string>
+    <string name="overlay_status_no_current_scheme">当前无方案</string>
+    <string name="overlay_status_current_scheme_no_steps">当前方案“%1$s”无可执行步骤</string>
     <string name="action_type_tap">点击步骤</string>
     <string name="action_type_long_press">长按步骤</string>
     <string name="action_type_swipe">滑动步骤</string>
@@ -211,7 +213,7 @@
     <string name="overlay_panel_save_success">保存成功</string>
     <string name="overlay_panel_save_failed">保存失败</string>
     <string name="overlay_panel_save_as_success">已另存为新方案</string>
-    <string name="overlay_panel_scheme_switched">方案已切换</string>
+    <string name="overlay_panel_scheme_switched">已切换到方案</string>
     <string name="overlay_panel_paused_updated">配置已更新，保持暂停</string>
 
     <string name="runner_state_idle">空闲</string>

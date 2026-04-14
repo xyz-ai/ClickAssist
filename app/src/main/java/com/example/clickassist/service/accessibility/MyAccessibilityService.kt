@@ -48,6 +48,7 @@ class MyAccessibilityService : AccessibilityService() {
     ): Boolean {
         val safeDuration = durationMs.coerceAtLeast(40L)
         Log.i(TAG, "dispatchTap requested x=$x y=$y durationMs=$safeDuration")
+        logDisplayGeometry("dispatchTap")
 
         return withContext(Dispatchers.Main.immediate) {
             val gesture = GestureDescription.Builder()
@@ -81,6 +82,7 @@ class MyAccessibilityService : AccessibilityService() {
             TAG,
             "dispatchSwipe requested start=($startX,$startY) end=($endX,$endY) durationMs=$safeDuration",
         )
+        logDisplayGeometry("dispatchSwipe")
 
         return withContext(Dispatchers.Main.immediate) {
             val gesture = GestureDescription.Builder()
@@ -110,6 +112,7 @@ class MyAccessibilityService : AccessibilityService() {
     ): Boolean {
         val safeDuration = durationMs.coerceAtLeast(500L)
         Log.i(TAG, "dispatchLongPress requested x=$x y=$y durationMs=$safeDuration")
+        logDisplayGeometry("dispatchLongPress")
         return dispatchTap(
             x = x,
             y = y,
@@ -176,6 +179,14 @@ class MyAccessibilityService : AccessibilityService() {
             activeInstance = null
             _serviceConnected.value = false
         }
+    }
+
+    private fun logDisplayGeometry(prefix: String) {
+        val metrics = resources.displayMetrics
+        Log.i(
+            TAG,
+            "$prefix displayMetrics width=${metrics.widthPixels} height=${metrics.heightPixels} densityDpi=${metrics.densityDpi}",
+        )
     }
 
     companion object {

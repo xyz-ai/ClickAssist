@@ -171,6 +171,7 @@ class OverlayToolbarController(
         @StringRes messageRes: Int,
     ) {
         runOnMain {
+            Log.i(TAG, "showMessage messageRes=$messageRes")
             currentUiState = currentUiState.copy(statusMessageRes = messageRes)
             renderStatus(currentUiState)
         }
@@ -367,13 +368,21 @@ class OverlayToolbarController(
                 uiState.selectedStepOrder,
                 appContext.getString(actionTypeLabelRes(uiState.selectedStepActionType)),
             )
+            !uiState.activeTaskName.isNullOrBlank() && uiState.selectedStepOrder == null -> appContext.getString(
+                R.string.overlay_status_current_scheme_no_steps,
+                uiState.activeTaskName,
+            )
             !uiState.activeTaskName.isNullOrBlank() -> appContext.getString(
                 R.string.overlay_current_task_label,
                 uiState.activeTaskName,
             )
-            else -> appContext.getString(R.string.overlay_selected_step_empty)
+            else -> appContext.getString(R.string.overlay_status_no_current_scheme)
         }
         statusTextView?.text = message
+        Log.d(
+            TAG,
+            "renderStatus taskId=${uiState.activeTaskId} taskName=${uiState.activeTaskName} selectedStepOrder=${uiState.selectedStepOrder} placementMode=${uiState.placementMode} message=$message",
+        )
     }
 
     private fun dispatchAction(

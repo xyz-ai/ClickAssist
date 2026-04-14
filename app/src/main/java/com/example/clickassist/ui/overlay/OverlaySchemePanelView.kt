@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.text.InputType
 import android.util.TypedValue
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -65,6 +66,7 @@ class OverlaySchemePanelView(
         contentContainer.addView(infiniteRoundsCheckBox, topMarginMatchParams())
         contentContainer.addView(
             actionButton(R.string.overlay_panel_save_scheme) {
+                Log.i(ACTION_TAG, "save current scheme clicked currentScheme=${model.currentTaskName}")
                 model.onSaveCurrent(
                     currentNameInput.text?.toString().orEmpty(),
                     totalRoundsInput.text?.toString().orEmpty(),
@@ -82,6 +84,7 @@ class OverlaySchemePanelView(
         contentContainer.addView(saveAsInput, matchWidthParams())
         contentContainer.addView(
             actionButton(R.string.overlay_panel_save_as) {
+                Log.i(ACTION_TAG, "save as clicked currentScheme=${model.currentTaskName}")
                 model.onSaveAs(
                     saveAsInput.text?.toString().orEmpty(),
                     totalRoundsInput.text?.toString().orEmpty(),
@@ -97,6 +100,7 @@ class OverlaySchemePanelView(
 
         contentContainer.addView(
             actionButton(R.string.overlay_action_hide_toolbar) {
+                Log.i(ACTION_TAG, "hide toolbar clicked currentScheme=${model.currentTaskName}")
                 model.onHideToolbar()
             },
             topMarginMatchParams(),
@@ -104,6 +108,7 @@ class OverlaySchemePanelView(
 
         contentContainer.addView(
             actionButton(R.string.overlay_action_close_floating) {
+                Log.i(ACTION_TAG, "close floating clicked currentScheme=${model.currentTaskName}")
                 model.onCloseFloating()
             },
             topMarginMatchParams(),
@@ -162,6 +167,10 @@ class OverlaySchemePanelView(
                                 R.string.overlay_panel_scheme_switch
                             },
                         ) {
+                            Log.i(
+                                SCHEME_TAG,
+                                "scheme item clicked taskId=${item.taskId} current=${item.isCurrent} name=${item.name}",
+                            )
                             model.onSchemeSelected(item.taskId)
                         }.apply {
                             isEnabled = !item.isCurrent
@@ -243,11 +252,13 @@ class OverlaySchemePanelView(
                             gravity = Gravity.START
                             addView(
                                 actionButton(R.string.overlay_panel_step_select) {
+                                    Log.i(ACTION_TAG, "wait step select clicked stepId=${item.stepId}")
                                     model.onWaitStepSelected(item.stepId)
                                 },
                             )
                             addView(
                                 actionButton(R.string.common_delete) {
+                                    Log.i(ACTION_TAG, "wait step delete clicked stepId=${item.stepId}")
                                     model.onDeleteWaitStep(item.stepId)
                                 },
                                 LinearLayout.LayoutParams(
@@ -355,5 +366,10 @@ class OverlaySchemePanelView(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    private companion object {
+        const val ACTION_TAG = "OverlayAction"
+        const val SCHEME_TAG = "SchemeSelection"
     }
 }

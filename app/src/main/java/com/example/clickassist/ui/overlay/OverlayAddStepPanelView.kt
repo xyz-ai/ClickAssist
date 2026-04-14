@@ -1,6 +1,7 @@
 package com.example.clickassist.ui.overlay
 
 import android.content.Context
+import android.util.Log
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -43,7 +44,10 @@ class OverlayAddStepPanelView(
         return Button(context).apply {
             text = context.getString(labelRes)
             isAllCaps = false
-            setOnClickListener { onClick() }
+            setOnClickListener {
+                Log.i(ACTION_TAG, "add node option clicked label=$text")
+                onClick()
+            }
         }
     }
 
@@ -58,5 +62,9 @@ class OverlayAddStepPanelView(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    private companion object {
+        const val ACTION_TAG = "OverlayAction"
     }
 }

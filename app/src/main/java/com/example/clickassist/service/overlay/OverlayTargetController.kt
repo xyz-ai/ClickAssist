@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.WindowInsets
 import com.example.clickassist.R
 import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.service.runner.OverlayPlacementMode
@@ -20,6 +21,28 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+data class MarkerGeometrySnapshot(
+    val markerId: String,
+    val left: Int,
+    val top: Int,
+    val width: Int,
+    val height: Int,
+    val centerX: Int,
+    val centerY: Int,
+)
+
+data class ScreenGeometrySnapshot(
+    val screenWidth: Int,
+    val screenHeight: Int,
+    val windowBounds: Rect,
+    val originOnScreenX: Int,
+    val originOnScreenY: Int,
+    val statusBarInsetTop: Int,
+    val navigationBarInsetBottom: Int,
+    val navigationBarInsetLeft: Int,
+    val navigationBarInsetRight: Int,
+)
 
 class OverlayTargetController(
     context: Context,
@@ -55,6 +78,11 @@ class OverlayTargetController(
 
     fun currentMarkerPoints(): Map<String, ScreenPoint> = currentPoints.toMap()
 
+    fun currentMarkerGeometry(markerId: String): MarkerGeometrySnapshot? =
+        currentMarkerGeometryInternal(markerId)
+
+    fun currentScreenGeometry(): ScreenGeometrySnapshot = currentScreenGeometryInternal()
+
     fun setTouchExclusionRects(rects: List<Rect>) {
         touchExclusionRects = rects.map(::Rect)
         runOnMain {
@@ -86,8 +114,14 @@ class OverlayTargetController(
         onMarkerSelected: (String) -> Unit,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         if (!hasPermission()) {
+            Log.e(TAG, "showLayer failed reason=overlay_permission_denied")
             return@withContext false
         }
+        logScreenGeometry("showLayer before_bind", currentScreenGeometryInternal())
+        Log.i(
+            TAG,
+            "showLayer markers=${markers.size} visible=$areMarkersVisible placementMode=$placementMode",
+        )
 
         onBackgroundTapCallback = onBackgroundTap
         onMarkerChangedCallback = onMarkerChanged
@@ -115,6 +149,7 @@ class OverlayTargetController(
         if (layerShown) {
             syncMarkersInternal(markers)
         }
+        Log.i(TAG, "showLayer result success=$layerShown")
         layerShown
     }
 
@@ -124,8 +159,14 @@ class OverlayTargetController(
         placementMode: OverlayPlacementMode = this@OverlayTargetController.placementMode,
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         if (!hasPermission()) {
+            Log.e(TAG, "updateLayer failed reason=overlay_permission_denied")
             return@withContext false
         }
+        logScreenGeometry("updateLayer before_bind", currentScreenGeometryInternal())
+        Log.i(
+            TAG,
+            "updateLayer markers=${markers.size} visible=$areMarkersVisible placementMode=$placementMode touchEnabled=$touchEnabled",
+        )
 
         currentMarkers = markers
         markersVisible = areMarkersVisible
@@ -156,6 +197,7 @@ class OverlayTargetController(
             }
         }
         syncMarkersInternal(markers)
+        Log.i(TAG, "updateLayer success markers=${markers.size}")
         true
     }
 
@@ -164,6 +206,7 @@ class OverlayTargetController(
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         markersVisible = visible
         val layer = layerView ?: return@withContext false
+        Log.i(TAG, "setMarkerVisibility visible=$visible markerCount=${currentMarkers.size}")
         bindLayer(layer)
         syncMarkersInternal(currentMarkers)
         true
@@ -174,6 +217,7 @@ class OverlayTargetController(
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         this@OverlayTargetController.placementMode = placementMode
         val layer = layerView ?: return@withContext false
+        Log.i(TAG, "setPlacementMode placementMode=$placementMode")
         bindLayer(layer)
         layerLayoutParams?.flags = layerFlags()
         if (layer.parent != null) {
@@ -190,6 +234,7 @@ class OverlayTargetController(
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         touchEnabled = enabled
         val layer = layerView ?: return@withContext false
+        Log.i(TAG, "setTouchEnabled enabled=$enabled")
         bindLayer(layer)
         layerLayoutParams?.flags = layerFlags()
         if (layer.parent != null) {
@@ -235,6 +280,7 @@ class OverlayTargetController(
     private fun bindLayer(
         layer: OverlayTargetLayerView,
     ) {
+        val screenGeometry = currentScreenGeometryInternal()
         layer.bind(
             markers = currentMarkers.map { marker ->
                 marker.copy(point = currentPoints[marker.markerId] ?: marker.point)
@@ -243,6 +289,8 @@ class OverlayTargetController(
             placementMode = placementMode,
             touchEnabled = touchEnabled,
             touchExclusionRects = touchExclusionRects,
+            originOnScreenX = screenGeometry.originOnScreenX,
+            originOnScreenY = screenGeometry.originOnScreenY,
             onBackgroundTap = { point ->
                 onBackgroundTapCallback?.invoke(point)
             },
@@ -264,6 +312,7 @@ class OverlayTargetController(
         }
 
         if (!markersVisible) {
+            Log.i(TAG, "syncMarkers hidden markerCount=${markerEntries.size}")
             markerEntries.values.forEach { entry ->
                 if (entry.view.parent != null) {
                     runCatching { windowManager.removeView(entry.view) }
@@ -273,6 +322,8 @@ class OverlayTargetController(
         }
 
         val bounds = getScreenBounds()
+        val screenGeometry = currentScreenGeometryInternal()
+        logScreenGeometry("syncMarkersInternal", screenGeometry)
         markers.forEach { model ->
             val entry = markerEntries[model.markerId] ?: createMarkerEntry(model.markerId).also {
                 markerEntries[model.markerId] = it
@@ -289,7 +340,12 @@ class OverlayTargetController(
             )
             entry.layoutParams.flags = markerFlags()
             val point = clampPoint(currentPoints[model.markerId] ?: model.point, bounds)
-            applyPointToLayoutParams(entry.layoutParams, point)
+            applyPointToLayoutParams(
+                layoutParams = entry.layoutParams,
+                point = point,
+                originOnScreenX = screenGeometry.originOnScreenX,
+                originOnScreenY = screenGeometry.originOnScreenY,
+            )
             currentPoints[model.markerId] = point
             runCatching {
                 if (entry.view.parent == null) {
@@ -300,9 +356,16 @@ class OverlayTargetController(
             }.onFailure { throwable ->
                 Log.e(TAG, "syncMarkers failed markerId=${model.markerId}", throwable)
             }
+            currentMarkerGeometryInternal(model.markerId)?.let { geometry ->
+                Log.i(
+                    TAG,
+                    "marker geometry markerId=${model.markerId} left=${geometry.left} top=${geometry.top} width=${geometry.width} height=${geometry.height} center=(${geometry.centerX},${geometry.centerY})",
+                )
+            }
         }
 
         bindLayer(layerView ?: return)
+        Log.i(TAG, "syncMarkers success visibleCount=${markers.size}")
     }
 
     private fun createMarkerEntry(
@@ -329,6 +392,7 @@ class OverlayTargetController(
         val entry = markerEntries[markerId] ?: return false
         return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                Log.i(TAG, "marker touch down markerId=$markerId")
                 entry.downRawX = event.rawX
                 entry.downRawY = event.rawY
                 entry.dragging = false
@@ -345,17 +409,20 @@ class OverlayTargetController(
                 }
 
                 val bounds = getScreenBounds()
-                val clampedLeft = (event.rawX - markerHalfSizePx).roundToInt()
-                    .coerceIn(0, (bounds.width - markerSizePx).coerceAtLeast(0))
-                val clampedTop = (event.rawY - markerHalfSizePx).roundToInt()
-                    .coerceIn(0, (bounds.height - markerSizePx).coerceAtLeast(0))
-                val point = ScreenPoint(
-                    x = clampedLeft + markerHalfSizePx,
-                    y = clampedTop + markerHalfSizePx,
+                val point = clampPoint(
+                    point = ScreenPoint(
+                        x = event.rawX.roundToInt(),
+                        y = event.rawY.roundToInt(),
+                    ),
+                    bounds = bounds,
                 )
-
-                entry.layoutParams.x = clampedLeft
-                entry.layoutParams.y = clampedTop
+                val screenGeometry = currentScreenGeometryInternal()
+                applyPointToLayoutParams(
+                    layoutParams = entry.layoutParams,
+                    point = point,
+                    originOnScreenX = screenGeometry.originOnScreenX,
+                    originOnScreenY = screenGeometry.originOnScreenY,
+                )
                 currentPoints[markerId] = point
 
                 runCatching {
@@ -371,9 +438,17 @@ class OverlayTargetController(
             MotionEvent.ACTION_UP -> {
                 if (entry.dragging) {
                     currentPoints[markerId]?.let { point ->
+                        Log.i(TAG, "marker drag end markerId=$markerId dragReportedPoint=$point")
+                        currentMarkerGeometryInternal(markerId)?.let { geometry ->
+                            Log.i(
+                                TAG,
+                                "marker drag end geometry markerId=$markerId left=${geometry.left} top=${geometry.top} width=${geometry.width} height=${geometry.height} center=(${geometry.centerX},${geometry.centerY}) savedPoint=$point",
+                            )
+                        }
                         onMarkerDragEndCallback?.invoke(markerId, point)
                     }
                 } else {
+                    Log.i(TAG, "marker selected markerId=$markerId")
                     onMarkerSelectedCallback?.invoke(markerId)
                     entry.view.performClick()
                 }
@@ -384,6 +459,13 @@ class OverlayTargetController(
             MotionEvent.ACTION_CANCEL -> {
                 if (entry.dragging) {
                     currentPoints[markerId]?.let { point ->
+                        Log.i(TAG, "marker drag cancelled markerId=$markerId dragReportedPoint=$point")
+                        currentMarkerGeometryInternal(markerId)?.let { geometry ->
+                            Log.i(
+                                TAG,
+                                "marker drag cancelled geometry markerId=$markerId left=${geometry.left} top=${geometry.top} width=${geometry.width} height=${geometry.height} center=(${geometry.centerX},${geometry.centerY}) savedPoint=$point",
+                            )
+                        }
                         onMarkerDragEndCallback?.invoke(markerId, point)
                     }
                 }
@@ -398,9 +480,11 @@ class OverlayTargetController(
     private fun applyPointToLayoutParams(
         layoutParams: WindowManager.LayoutParams,
         point: ScreenPoint,
+        originOnScreenX: Int,
+        originOnScreenY: Int,
     ) {
-        layoutParams.x = (point.x - markerHalfSizePx).coerceAtLeast(0)
-        layoutParams.y = (point.y - markerHalfSizePx).coerceAtLeast(0)
+        layoutParams.x = (point.x - markerHalfSizePx - originOnScreenX).coerceAtLeast(0)
+        layoutParams.y = (point.y - markerHalfSizePx - originOnScreenY).coerceAtLeast(0)
     }
 
     private fun clampPoint(
@@ -497,6 +581,108 @@ class OverlayTargetController(
         return ScreenBounds(
             width = metrics.widthPixels.coerceAtLeast(markerSizePx),
             height = metrics.heightPixels.coerceAtLeast(markerSizePx),
+        )
+    }
+
+    private fun currentMarkerGeometryInternal(
+        markerId: String,
+    ): MarkerGeometrySnapshot? {
+        val entry = markerEntries[markerId] ?: return null
+        val fallbackOrigin = resolveOverlayOriginOnScreen()
+        val width = when {
+            entry.view.width > 0 -> entry.view.width
+            entry.view.measuredWidth > 0 -> entry.view.measuredWidth
+            else -> entry.layoutParams.width.coerceAtLeast(markerSizePx)
+        }
+        val height = when {
+            entry.view.height > 0 -> entry.view.height
+            entry.view.measuredHeight > 0 -> entry.view.measuredHeight
+            else -> entry.layoutParams.height.coerceAtLeast(markerSizePx)
+        }
+        val attached = entry.view.parent != null && entry.view.isAttachedToWindow
+        val left: Int
+        val top: Int
+        if (attached) {
+            val location = IntArray(2)
+            entry.view.getLocationOnScreen(location)
+            left = location[0]
+            top = location[1]
+        } else {
+            left = entry.layoutParams.x + fallbackOrigin.x
+            top = entry.layoutParams.y + fallbackOrigin.y
+        }
+        return MarkerGeometrySnapshot(
+            markerId = markerId,
+            left = left,
+            top = top,
+            width = width,
+            height = height,
+            centerX = left + width / 2,
+            centerY = top + height / 2,
+        )
+    }
+
+    private fun currentScreenGeometryInternal(): ScreenGeometrySnapshot {
+        val origin = resolveOverlayOriginOnScreen()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metrics = windowManager.currentWindowMetrics
+            val bounds = Rect(metrics.bounds)
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars())
+            ScreenGeometrySnapshot(
+                screenWidth = bounds.width().coerceAtLeast(markerSizePx),
+                screenHeight = bounds.height().coerceAtLeast(markerSizePx),
+                windowBounds = bounds,
+                originOnScreenX = origin.x,
+                originOnScreenY = origin.y,
+                statusBarInsetTop = insets.top,
+                navigationBarInsetBottom = insets.bottom,
+                navigationBarInsetLeft = insets.left,
+                navigationBarInsetRight = insets.right,
+            )
+        } else {
+            val metrics = appContext.resources.displayMetrics
+            ScreenGeometrySnapshot(
+                screenWidth = metrics.widthPixels.coerceAtLeast(markerSizePx),
+                screenHeight = metrics.heightPixels.coerceAtLeast(markerSizePx),
+                windowBounds = Rect(0, 0, metrics.widthPixels, metrics.heightPixels),
+                originOnScreenX = origin.x,
+                originOnScreenY = origin.y,
+                statusBarInsetTop = 0,
+                navigationBarInsetBottom = 0,
+                navigationBarInsetLeft = 0,
+                navigationBarInsetRight = 0,
+            )
+        }
+    }
+
+    private fun resolveOverlayOriginOnScreen(): ScreenPoint {
+        val layer = layerView
+        if (layer != null && layer.parent != null && layer.isAttachedToWindow) {
+            val location = IntArray(2)
+            layer.getLocationOnScreen(location)
+            return ScreenPoint(
+                x = location[0] - (layerLayoutParams?.x ?: 0),
+                y = location[1] - (layerLayoutParams?.y ?: 0),
+            )
+        }
+        markerEntries.values.firstOrNull { it.view.parent != null && it.view.isAttachedToWindow }?.let { entry ->
+            val location = IntArray(2)
+            entry.view.getLocationOnScreen(location)
+            return ScreenPoint(
+                x = location[0] - entry.layoutParams.x,
+                y = location[1] - entry.layoutParams.y,
+            )
+        }
+        return ScreenPoint(0, 0)
+    }
+
+    private fun logScreenGeometry(
+        prefix: String,
+        geometry: ScreenGeometrySnapshot,
+    ) {
+        Log.i(
+            TAG,
+            "$prefix screen=${geometry.screenWidth}x${geometry.screenHeight} windowBounds=${geometry.windowBounds} origin=(${geometry.originOnScreenX},${geometry.originOnScreenY}) insets(top=${geometry.statusBarInsetTop},bottom=${geometry.navigationBarInsetBottom},left=${geometry.navigationBarInsetLeft},right=${geometry.navigationBarInsetRight})",
         )
     }
 

@@ -20,7 +20,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 data class EditableStepDraft(
     val draftKey: Long,
@@ -90,27 +92,29 @@ class TaskEditViewModel(
     private val taskRepository: TaskRepository,
     private val settingsRepository: SettingsRepository,
     private val defaultTaskName: String,
+    initialSettings: AppSettings = AppSettings(),
 ) : ViewModel() {
-    private val internalState = MutableStateFlow(
-        TaskEditUiState(
-            isLoading = taskId != 0L,
-            steps = listOf(defaultDraft(1L)),
-            editingStepKey = 1L,
-        ),
-    )
+    private var nextDraftKey = 2L
+    private var latestSettings = initialSettings
+    private var hasAppliedNewTaskDefaults = false
+    private val internalState = MutableStateFlow(createInitialState(initialSettings))
     val uiState: StateFlow<TaskEditUiState> = internalState.asStateFlow()
 
     private val _savedTaskIds = MutableSharedFlow<Long>(extraBufferCapacity = 1)
     val savedTaskIds = _savedTaskIds.asSharedFlow()
 
-    private var nextDraftKey = 2L
-    private var latestSettings = AppSettings()
-    private var hasAppliedNewTaskDefaults = false
-
     init {
+        Log.i(
+            INIT_TAG,
+            "init taskId=$taskId initialSettingsSource=factory_snapshot defaultStepIntervalMs=${initialSettings.defaultStepIntervalMs}",
+        )
         viewModelScope.launch {
             settingsRepository.settingsFlow.collect { settings ->
                 latestSettings = settings
+                Log.i(
+                    FACTORY_TAG,
+                    "settingsFlow update taskId=$taskId defaultStepIntervalMs=${settings.defaultStepIntervalMs}",
+                )
                 if (taskId == 0L && !hasAppliedNewTaskDefaults) {
                     hasAppliedNewTaskDefaults = true
                     val current = internalState.value
@@ -118,7 +122,12 @@ class TaskEditViewModel(
                         internalState.value = current.copy(
                             totalRounds = settings.defaultTotalRounds.toString(),
                             steps = current.steps.map { draft ->
-                                defaultDraft(draft.draftKey, draft.actionType)
+                                defaultDraft(
+                                    draftKey = draft.draftKey,
+                                    actionType = draft.actionType,
+                                    settings = settings,
+                                    settingsSource = SETTINGS_SOURCE_LATEST,
+                                )
                             },
                             editingStepKey = current.editingStepKey ?: current.steps.first().draftKey,
                         )
@@ -143,7 +152,12 @@ class TaskEditViewModel(
         val key = nextDraftKey++
         updateState {
             clearedFeedback().copy(
-                steps = steps + defaultDraft(key, actionType),
+                steps = steps + defaultDraft(
+                    draftKey = key,
+                    actionType = actionType,
+                    settings = latestSettings,
+                    settingsSource = SETTINGS_SOURCE_LATEST,
+                ),
                 editingStepKey = key,
             )
         }
@@ -154,7 +168,13 @@ class TaskEditViewModel(
     fun deleteStep(draftKey: Long) {
         updateState {
             val updatedSteps = steps.filterNot { it.draftKey == draftKey }.ifEmpty {
-                listOf(defaultDraft(nextDraftKey++))
+                listOf(
+                    defaultDraft(
+                        draftKey = nextDraftKey++,
+                        settings = latestSettings,
+                        settingsSource = SETTINGS_SOURCE_LATEST,
+                    ),
+                )
             }
             clearedFeedback().copy(
                 steps = updatedSteps,
@@ -434,7 +454,13 @@ class TaskEditViewModel(
                         )
                     }
                     .ifEmpty {
-                        listOf(defaultDraft(nextDraftKey++))
+                        listOf(
+                            defaultDraft(
+                                draftKey = nextDraftKey++,
+                                settings = latestSettings,
+                                settingsSource = SETTINGS_SOURCE_LATEST,
+                            ),
+                        )
                     }
 
                 internalState.value = TaskEditUiState(
@@ -564,27 +590,75 @@ class TaskEditViewModel(
     private fun defaultDraft(
         draftKey: Long,
         actionType: ActionType = ActionType.TAP,
+        settings: AppSettings? = latestSettings,
+        settingsSource: String = SETTINGS_SOURCE_LATEST,
     ): EditableStepDraft {
-        return EditableStepDraft(
+        val resolvedSource = when {
+            settings != null -> settingsSource
+            else -> SETTINGS_SOURCE_FALLBACK
+        }
+        val safeSettings = settings ?: AppSettings()
+        Log.i(
+            DRAFT_TAG,
+            "defaultDraft draftKey=$draftKey actionType=$actionType settingsSource=$resolvedSource defaultStepIntervalMs=${safeSettings.defaultStepIntervalMs}",
+        )
+        val draft = EditableStepDraft(
             draftKey = draftKey,
             actionType = actionType,
-            intervalMs = latestSettings.defaultStepIntervalMs.toString(),
-            durationMs = defaultDurationFor(actionType).toString(),
-            repeatCount = latestSettings.defaultNewStepRepeatCount.toString(),
+            intervalMs = safeSettings.defaultStepIntervalMs.toString(),
+            durationMs = defaultDurationFor(actionType, safeSettings).toString(),
+            repeatCount = safeSettings.defaultNewStepRepeatCount.toString(),
+        )
+        Log.i(
+            DRAFT_TAG,
+            "defaultDraft created draftKey=$draftKey actionType=$actionType repeatCount=${draft.repeatCount} intervalMs=${draft.intervalMs} durationMs=${draft.durationMs}",
+        )
+        return draft
+    }
+
+    private fun createInitialState(
+        settings: AppSettings?,
+    ): TaskEditUiState {
+        val safeSettings = settings ?: AppSettings()
+        val settingsSource = if (settings != null) SETTINGS_SOURCE_FACTORY else SETTINGS_SOURCE_FALLBACK
+        val initialDraft = defaultDraft(
+            draftKey = 1L,
+            settings = safeSettings,
+            settingsSource = settingsSource,
+        )
+        Log.i(
+            INIT_TAG,
+            "createInitialState taskId=$taskId isLoading=${taskId != 0L} settingsSource=$settingsSource",
+        )
+        return TaskEditUiState(
+            isLoading = taskId != 0L,
+            totalRounds = safeSettings.defaultTotalRounds.toString(),
+            steps = listOf(initialDraft),
+            editingStepKey = initialDraft.draftKey,
         )
     }
 
-    private fun defaultDurationFor(actionType: ActionType): Long {
+    private fun defaultDurationFor(
+        actionType: ActionType,
+        settings: AppSettings? = latestSettings,
+    ): Long {
+        val safeSettings = settings ?: AppSettings()
         return when (actionType) {
-            ActionType.TAP -> latestSettings.defaultTapDurationMs
-            ActionType.LONG_PRESS -> latestSettings.defaultLongPressDurationMs
-            ActionType.SWIPE -> latestSettings.defaultSwipeDurationMs
+            ActionType.TAP -> safeSettings.defaultTapDurationMs
+            ActionType.LONG_PRESS -> safeSettings.defaultLongPressDurationMs
+            ActionType.SWIPE -> safeSettings.defaultSwipeDurationMs
             ActionType.WAIT -> 1000L
         }
     }
 
     companion object {
         private const val TAG = "TaskEditSave"
+        private const val INIT_TAG = "TaskEditInit"
+        private const val FACTORY_TAG = "TaskEditFactory"
+        private const val DRAFT_TAG = "TaskEditDraft"
+        private const val SETTINGS_SOURCE_FACTORY = "factory_snapshot"
+        private const val SETTINGS_SOURCE_LATEST = "latest_settings"
+        private const val SETTINGS_SOURCE_FALLBACK = "fallback_default"
 
         fun factory(
             appContainer: AppContainer,
@@ -593,11 +667,27 @@ class TaskEditViewModel(
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    val repositorySettings = runBlocking {
+                        runCatching {
+                            appContainer.settingsRepository.settingsFlow.first()
+                        }.getOrNull()
+                    }
+                    val settingsSource = if (repositorySettings != null) {
+                        SETTINGS_SOURCE_FACTORY
+                    } else {
+                        SETTINGS_SOURCE_FALLBACK
+                    }
+                    val safeSettings = repositorySettings ?: AppSettings()
+                    Log.i(
+                        FACTORY_TAG,
+                        "create taskId=$taskId settingsSource=$settingsSource repositoryNull=${repositorySettings == null} defaultStepIntervalMs=${safeSettings.defaultStepIntervalMs}",
+                    )
                     return TaskEditViewModel(
                         taskId = taskId,
                         taskRepository = appContainer.taskRepository,
                         settingsRepository = appContainer.settingsRepository,
                         defaultTaskName = appContainer.appContext.getString(R.string.default_task_name),
+                        initialSettings = safeSettings,
                     ) as T
                 }
             }

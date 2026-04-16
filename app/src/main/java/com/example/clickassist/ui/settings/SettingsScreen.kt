@@ -1,5 +1,6 @@
 package com.example.clickassist.ui.settings
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -32,7 +33,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.clickassist.R
 import com.example.clickassist.common.i18n.AppLanguage
+import com.example.clickassist.common.i18n.LocaleManager
 import com.example.clickassist.ui.theme.AppThemeMode
+import com.example.clickassist.viewmodel.LanguageChangeDecision
 import com.example.clickassist.viewmodel.SettingsViewModel
 import kotlinx.coroutines.launch
 
@@ -54,6 +57,31 @@ fun SettingsScreen(
         }.getOrNull().orEmpty()
     }
     val tutorialComingSoon = stringResource(R.string.settings_about_tutorial_coming_soon)
+    val onLanguageSelected: (AppLanguage) -> Unit = remember(
+        viewModel,
+        settings.languageMode,
+        scope,
+    ) {
+        { targetLanguage ->
+            scope.launch {
+                Log.i(TAG, "language option clicked current=${settings.languageMode} target=$targetLanguage")
+                when (val decision = viewModel.requestLanguageChange(targetLanguage)) {
+                    LanguageChangeDecision.SkipSameLanguage -> {
+                        Log.i(TAG, "skip same language current=${settings.languageMode} target=$targetLanguage")
+                    }
+
+                    is LanguageChangeDecision.ApplyLanguage -> {
+                        val applied = LocaleManager.applyLanguage(decision.target)
+                        Log.i(
+                            TAG,
+                            "apply language requested target=${decision.target} applied=$applied manualRecreate=false",
+                        )
+                        Log.i(TAG, "manual recreate skipped; rely on AppCompat locale recreation")
+                    }
+                }
+            }
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -85,17 +113,17 @@ fun SettingsScreen(
                             ChoiceOption(
                                 label = stringResource(R.string.settings_language_follow_system),
                                 selected = settings.languageMode == AppLanguage.FOLLOW_SYSTEM,
-                                onClick = { viewModel.setLanguageMode(AppLanguage.FOLLOW_SYSTEM) },
+                                onClick = { onLanguageSelected(AppLanguage.FOLLOW_SYSTEM) },
                             ),
                             ChoiceOption(
                                 label = stringResource(R.string.settings_language_english),
                                 selected = settings.languageMode == AppLanguage.ENGLISH,
-                                onClick = { viewModel.setLanguageMode(AppLanguage.ENGLISH) },
+                                onClick = { onLanguageSelected(AppLanguage.ENGLISH) },
                             ),
                             ChoiceOption(
                                 label = stringResource(R.string.settings_language_simplified_chinese),
                                 selected = settings.languageMode == AppLanguage.ZH_CN,
-                                onClick = { viewModel.setLanguageMode(AppLanguage.ZH_CN) },
+                                onClick = { onLanguageSelected(AppLanguage.ZH_CN) },
                             ),
                         ),
                     )
@@ -231,6 +259,8 @@ fun SettingsScreen(
         }
     }
 }
+
+private const val TAG = "SettingsLanguage"
 
 @Composable
 private fun SettingsSection(

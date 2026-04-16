@@ -1,5 +1,6 @@
 package com.example.clickassist.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -10,6 +11,7 @@ import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.ui.theme.AppThemeMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -17,6 +19,14 @@ import kotlinx.coroutines.launch
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
 )
+
+sealed interface LanguageChangeDecision {
+    data object SkipSameLanguage : LanguageChangeDecision
+
+    data class ApplyLanguage(
+        val target: AppLanguage,
+    ) : LanguageChangeDecision
+}
 
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
@@ -29,8 +39,17 @@ class SettingsViewModel(
             initialValue = SettingsUiState(),
         )
 
-    fun setLanguageMode(languageMode: AppLanguage) = launchUpdate {
+    suspend fun requestLanguageChange(languageMode: AppLanguage): LanguageChangeDecision {
+        val currentLanguage = settingsRepository.settingsFlow.first().languageMode
+        Log.i(TAG, "language option clicked current=$currentLanguage target=$languageMode")
+        if (currentLanguage == languageMode) {
+            Log.i(TAG, "skip same language current=$currentLanguage target=$languageMode")
+            return LanguageChangeDecision.SkipSameLanguage
+        }
+
         settingsRepository.setLanguageMode(languageMode)
+        Log.i(TAG, "persist new language target=$languageMode")
+        return LanguageChangeDecision.ApplyLanguage(target = languageMode)
     }
 
     fun setThemeMode(themeMode: AppThemeMode) = launchUpdate {
@@ -90,6 +109,8 @@ class SettingsViewModel(
     }
 
     companion object {
+        private const val TAG = "SettingsLanguage"
+
         fun factory(appContainer: AppContainer): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

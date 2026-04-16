@@ -1,5 +1,6 @@
 package com.example.clickassist.ui.tasklist
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -75,7 +76,12 @@ fun TaskListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCreateTask) {
+            FloatingActionButton(
+                onClick = {
+                    Log.i(TAG, "create task clicked from task list")
+                    onCreateTask()
+                },
+            ) {
                 Text(text = stringResource(R.string.common_add))
             }
         },
@@ -429,3 +435,5 @@ private fun actionTypeLabelRes(
         ActionType.WAIT -> R.string.action_type_wait
     }
 }
+
+private const val TAG = "TaskEditInit"

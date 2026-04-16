@@ -14,6 +14,11 @@ object LocaleManager {
     }
 
     fun applyLanguage(language: AppLanguage) {
-        AppCompatDelegate.setApplicationLocales(toLocaleList(language))
+        val targetLocales = toLocaleList(language)
+        val currentLocales = AppCompatDelegate.getApplicationLocales()
+        if (currentLocales.toLanguageTags() == targetLocales.toLanguageTags()) {
+            return
+        }
+        AppCompatDelegate.setApplicationLocales(targetLocales)
     }
 }

@@ -220,6 +220,12 @@ class TaskRunnerEngine(
 
     fun requestJsonExport() = overlayController.requestJsonExport()
 
+    fun refreshLocalizedResources() {
+        engineScope.launch {
+            overlayController.applySettings(latestSettings)
+        }
+    }
+
     fun requestTaskTemplateClone() { /* TODO reserve task template clone entry */
     }
 

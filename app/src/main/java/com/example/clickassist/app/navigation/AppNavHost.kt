@@ -53,6 +53,11 @@ fun AppNavHost(
                         launchSingleTop = true
                     }
                 },
+                onOpenSettings = {
+                    navController.navigate(SETTINGS_ROUTE) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 

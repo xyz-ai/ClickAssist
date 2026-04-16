@@ -63,6 +63,7 @@ class OverlayHandleController(
                 cornerRadius = dpFloat(18)
             }
             handleButton?.setTextColor(currentAppearance.textPrimaryColor)
+            handleLayoutParams?.let { updateArrowDirection(it.x) }
         }
     }
 

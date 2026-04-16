@@ -43,6 +43,7 @@
     <string name="permission_accessibility_open_count">Accessibility guide opened: %1$d</string>
     <string name="permission_summary_ready">Required permissions are ready for local automation.</string>
     <string name="permission_summary_missing">Some permissions are still missing. Tasks can be saved, but execution will fail until they are granted.</string>
+    <string name="permission_open_settings">Go to settings</string>
     <string name="permission_open_task_list">Open task list</string>
 
     <string name="task_list_title">Tasks</string>

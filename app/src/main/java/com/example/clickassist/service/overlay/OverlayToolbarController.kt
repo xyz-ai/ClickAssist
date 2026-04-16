@@ -102,6 +102,7 @@ class OverlayToolbarController(
         currentAppearance = OverlayAppearance.fromSettings(appContext, settings)
         runOnMain {
             applyAppearanceInternal()
+            applyUiState(currentUiState)
             toolbarView?.let { view ->
                 toolbarLayoutParams?.let { layoutParams ->
                     applyPosition(

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -25,7 +24,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -41,7 +44,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.example.clickassist.R
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 @Composable
@@ -66,14 +71,24 @@ fun TutorialOverlay(
         val closeButtonSize = 44.dp
         val closeButtonPadding = 16.dp
         val cardWidthDp = minOf(280.dp, maxWidth - 32.dp)
+        var measuredCardHeightPx by remember { mutableIntStateOf(0) }
+        var measuredActionBarHeightPx by remember { mutableIntStateOf(0) }
         val screenWidthPx = with(density) { maxWidth.toPx() }
         val screenHeightPx = with(density) { maxHeight.toPx() }
         val cardWidthPx = with(density) { cardWidthDp.toPx() }
         val horizontalPaddingPx = with(density) { 16.dp.toPx() }
-        val topPaddingPx = with(density) { 24.dp.toPx() }
-        val topControlsReservedPx = with(density) {
-            (closeButtonSize + closeButtonPadding * 2).toPx()
+        val topPaddingPx = with(density) { 20.dp.toPx() }
+        val topControlsReservedPx = with(density) { (closeButtonSize + closeButtonPadding * 2).toPx() }
+        val defaultCardHeightPx = with(density) { 172.dp.toPx() }
+        val cardHeightPx = if (measuredCardHeightPx > 0) {
+            measuredCardHeightPx.toFloat()
+        } else {
+            defaultCardHeightPx
         }
+        val bottomControlsReservedPx = max(
+            with(density) { 124.dp.toPx() }.roundToInt(),
+            measuredActionBarHeightPx + with(density) { 28.dp.toPx() }.roundToInt(),
+        ).toFloat()
         val closeDescription = stringResource(R.string.tutorial_close)
         val outlineColor = MaterialTheme.colorScheme.primary
         val cardOffset = rememberTutorialCardOffset(
@@ -82,9 +97,11 @@ fun TutorialOverlay(
             screenWidthPx = screenWidthPx,
             screenHeightPx = screenHeightPx,
             cardWidthPx = cardWidthPx,
+            cardHeightPx = cardHeightPx,
             horizontalPaddingPx = horizontalPaddingPx,
             topPaddingPx = topPaddingPx,
             topControlsReservedPx = topControlsReservedPx,
+            bottomControlsReservedPx = bottomControlsReservedPx,
         )
 
         Box(
@@ -116,6 +133,7 @@ fun TutorialOverlay(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .zIndex(0f)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -127,6 +145,7 @@ fun TutorialOverlay(
                 onClick = onClose,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .zIndex(2f)
                     .padding(top = closeButtonPadding, end = closeButtonPadding)
                     .height(closeButtonSize)
                     .semantics {
@@ -144,6 +163,8 @@ fun TutorialOverlay(
                 modifier = Modifier
                     .padding(horizontal = 16.dp)
                     .width(cardWidthDp)
+                    .zIndex(1f)
+                    .onSizeChanged { measuredCardHeightPx = it.height }
                     .offset {
                         IntOffset(
                             x = cardOffset.first.roundToInt(),
@@ -184,6 +205,7 @@ fun TutorialOverlay(
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .zIndex(3f)
                     .fillMaxWidth()
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 20.dp),
@@ -192,11 +214,14 @@ fun TutorialOverlay(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onSizeChanged { measuredActionBarHeightPx = it.height }
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (stepIndex > 0) {
+                    val isFirstStep = stepIndex == 0
+                    val isFinalStep = stepIndex == totalSteps - 1
+                    if (!isFirstStep) {
                         OutlinedButton(
                             onClick = onBack,
                             modifier = Modifier.weight(1f),
@@ -204,7 +229,7 @@ fun TutorialOverlay(
                             Text(text = stringResource(R.string.tutorial_back))
                         }
                     }
-                    if (stepIndex < totalSteps - 1) {
+                    if (!isFinalStep) {
                         OutlinedButton(
                             onClick = onSkip,
                             modifier = Modifier.weight(1f),
@@ -212,7 +237,7 @@ fun TutorialOverlay(
                             Text(text = stringResource(R.string.tutorial_skip))
                         }
                     }
-                    if (stepIndex == totalSteps - 1) {
+                    if (isFinalStep) {
                         Button(
                             onClick = onDone,
                             modifier = Modifier.weight(1f),
@@ -240,60 +265,78 @@ private fun rememberTutorialCardOffset(
     screenWidthPx: Float,
     screenHeightPx: Float,
     cardWidthPx: Float,
+    cardHeightPx: Float,
     horizontalPaddingPx: Float,
     topPaddingPx: Float,
     topControlsReservedPx: Float,
+    bottomControlsReservedPx: Float,
 ): Pair<Float, Float> {
-    val bottomControlsReservedPx = with(LocalDensity.current) { 132.dp.toPx() }
-    val cardHeightEstimatePx = with(LocalDensity.current) { 156.dp.toPx() }
-
     if (targetRect == null) {
         return Pair(
-            ((screenWidthPx - cardWidthPx) / 2f).coerceAtLeast(horizontalPaddingPx),
-            (screenHeightPx * 0.2f).coerceAtLeast(topControlsReservedPx),
+            clampToBounds(
+                value = (screenWidthPx - cardWidthPx) / 2f,
+                min = horizontalPaddingPx,
+                max = screenWidthPx - cardWidthPx - horizontalPaddingPx,
+            ),
+            clampToBounds(
+                value = screenHeightPx * 0.2f,
+                min = topControlsReservedPx.coerceAtLeast(topPaddingPx),
+                max = screenHeightPx - cardHeightPx - bottomControlsReservedPx,
+            ),
         )
     }
 
     val x = when (placement) {
         TutorialPlacement.LEFT -> {
-            (targetRect.left - cardWidthPx - horizontalPaddingPx)
-                .coerceAtLeast(horizontalPaddingPx)
+            targetRect.left - cardWidthPx - horizontalPaddingPx
         }
 
         TutorialPlacement.RIGHT -> {
-            (targetRect.right + horizontalPaddingPx)
-                .coerceAtMost(screenWidthPx - cardWidthPx - horizontalPaddingPx)
+            targetRect.right + horizontalPaddingPx
         }
 
         TutorialPlacement.ABOVE,
         TutorialPlacement.BELOW,
         -> {
-            (targetRect.centerX() - (cardWidthPx / 2f))
-                .coerceIn(horizontalPaddingPx, screenWidthPx - cardWidthPx - horizontalPaddingPx)
+            targetRect.centerX() - (cardWidthPx / 2f)
         }
     }
 
     val y = when (placement) {
         TutorialPlacement.ABOVE -> {
-            (targetRect.top - cardHeightEstimatePx - horizontalPaddingPx)
-                .coerceAtLeast(topControlsReservedPx.coerceAtLeast(topPaddingPx))
+            targetRect.top - cardHeightPx - horizontalPaddingPx
         }
 
         TutorialPlacement.BELOW -> {
-            (targetRect.bottom + horizontalPaddingPx)
-                .coerceAtMost(screenHeightPx - cardHeightEstimatePx - bottomControlsReservedPx)
+            targetRect.bottom + horizontalPaddingPx
         }
 
         TutorialPlacement.LEFT,
         TutorialPlacement.RIGHT,
         -> {
-            (targetRect.centerY() - (cardHeightEstimatePx / 2f))
-                .coerceIn(
-                    topControlsReservedPx.coerceAtLeast(topPaddingPx),
-                    screenHeightPx - cardHeightEstimatePx - bottomControlsReservedPx,
-                )
+            targetRect.centerY() - (cardHeightPx / 2f)
         }
     }
 
-    return Pair(x, y)
+    return Pair(
+        clampToBounds(
+            value = x,
+            min = horizontalPaddingPx,
+            max = screenWidthPx - cardWidthPx - horizontalPaddingPx,
+        ),
+        clampToBounds(
+            value = y,
+            min = topControlsReservedPx.coerceAtLeast(topPaddingPx),
+            max = screenHeightPx - cardHeightPx - bottomControlsReservedPx,
+        ),
+    )
+}
+
+private fun clampToBounds(
+    value: Float,
+    min: Float,
+    max: Float,
+): Float {
+    val resolvedMax = max.coerceAtLeast(min)
+    return value.coerceIn(min, resolvedMax)
 }

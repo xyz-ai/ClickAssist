@@ -36,6 +36,8 @@ class DataStoreSettingsRepository(
             AppSettings(
                 languageMode = AppLanguage.fromStorage(preferences[LANGUAGE_MODE_KEY]),
                 themeMode = AppThemeMode.fromStorage(preferences[THEME_MODE_KEY]),
+                hasSeenOnboarding = preferences[HAS_SEEN_ONBOARDING_KEY] ?: false,
+                hasSeenFloatingTutorial = preferences[HAS_SEEN_FLOATING_TUTORIAL_KEY] ?: false,
                 toolbarDefaultExpanded = preferences[TOOLBAR_DEFAULT_EXPANDED_KEY] ?: true,
                 showHandleWhenToolbarHidden = preferences[SHOW_HANDLE_WHEN_HIDDEN_KEY] ?: true,
                 markerSizeDp = preferences[MARKER_SIZE_DP_KEY] ?: 56,
@@ -66,6 +68,18 @@ class DataStoreSettingsRepository(
     override suspend fun setThemeMode(themeMode: AppThemeMode) {
         dataStore.edit { preferences ->
             preferences[THEME_MODE_KEY] = themeMode.storageValue
+        }
+    }
+
+    override suspend fun setHasSeenOnboarding(seen: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[HAS_SEEN_ONBOARDING_KEY] = seen
+        }
+    }
+
+    override suspend fun setHasSeenFloatingTutorial(seen: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[HAS_SEEN_FLOATING_TUTORIAL_KEY] = seen
         }
     }
 
@@ -179,6 +193,8 @@ class DataStoreSettingsRepository(
     private companion object {
         val LANGUAGE_MODE_KEY = stringPreferencesKey("language_mode")
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
+        val HAS_SEEN_ONBOARDING_KEY = booleanPreferencesKey("has_seen_onboarding")
+        val HAS_SEEN_FLOATING_TUTORIAL_KEY = booleanPreferencesKey("has_seen_floating_tutorial")
         val TOOLBAR_DEFAULT_EXPANDED_KEY = booleanPreferencesKey("toolbar_default_expanded")
         val SHOW_HANDLE_WHEN_HIDDEN_KEY = booleanPreferencesKey("show_handle_when_hidden")
         val MARKER_SIZE_DP_KEY = intPreferencesKey("marker_size_dp")

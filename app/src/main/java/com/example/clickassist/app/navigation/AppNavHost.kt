@@ -2,14 +2,17 @@ package com.example.clickassist.app.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.clickassist.app.AppContainer
+import com.example.clickassist.ui.onboarding.OnboardingScreen
 import com.example.clickassist.ui.permission.PermissionGuideScreen
 import com.example.clickassist.ui.settings.SettingsScreen
 import com.example.clickassist.ui.taskedit.TaskEditScreen
@@ -18,8 +21,10 @@ import com.example.clickassist.viewmodel.PermissionGuideViewModel
 import com.example.clickassist.viewmodel.SettingsViewModel
 import com.example.clickassist.viewmodel.TaskEditViewModel
 import com.example.clickassist.viewmodel.TaskListViewModel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 
+private const val ONBOARDING_ROUTE = "onboarding"
 private const val PERMISSION_GUIDE_ROUTE = "permission_guide"
 private const val TASK_LIST_ROUTE = "task_list"
 private const val TASK_EDIT_ROUTE = "task_edit"
@@ -32,15 +37,33 @@ private fun taskEditRoute(taskId: Long): String = "$TASK_EDIT_ROUTE/$taskId"
 @Composable
 fun AppNavHost(
     appContainer: AppContainer,
+    showOnboardingInitially: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
 
     NavHost(
         navController = navController,
-        startDestination = PERMISSION_GUIDE_ROUTE,
+        startDestination = if (showOnboardingInitially) ONBOARDING_ROUTE else TASK_LIST_ROUTE,
         modifier = modifier,
     ) {
+        composable(route = ONBOARDING_ROUTE) {
+            OnboardingScreen(
+                onFinish = {
+                    scope.launch {
+                        appContainer.settingsRepository.setHasSeenOnboarding(true)
+                        navController.navigate(TASK_LIST_ROUTE) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                inclusive = true
+                            }
+                            launchSingleTop = true
+                        }
+                    }
+                },
+            )
+        }
+
         composable(route = PERMISSION_GUIDE_ROUTE) {
             val viewModel: PermissionGuideViewModel = viewModel(
                 factory = PermissionGuideViewModel.factory(appContainer),
@@ -120,6 +143,14 @@ fun AppNavHost(
             SettingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
+                onOpenOnboarding = {
+                    navController.navigate(ONBOARDING_ROUTE) {
+                        launchSingleTop = true
+                    }
+                },
+                onReopenFloatingTutorial = {
+                    appContainer.taskRunnerEngine.reopenFloatingTutorialIfPossible()
+                },
             )
         }
     }

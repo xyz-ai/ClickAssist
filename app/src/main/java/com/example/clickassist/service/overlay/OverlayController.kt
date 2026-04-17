@@ -6,12 +6,16 @@ import androidx.annotation.StringRes
 import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.service.runner.OverlayPlacementMode
+import com.example.clickassist.ui.tutorial.TutorialController
+import com.example.clickassist.ui.tutorial.TutorialStep
 
 class OverlayController(
     private val toolbarController: OverlayToolbarController,
     private val targetController: OverlayTargetController,
     private val panelController: OverlayPanelController,
     private val handleController: OverlayHandleController,
+    private val tutorialController: OverlayTutorialController,
+    private val tutorialAnchorController: TutorialController,
 ) {
     private var toolbarCallbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
     private var handleExpandCallback: (() -> Unit)? = null
@@ -152,6 +156,33 @@ class OverlayController(
         return shown
     }
 
+    suspend fun showTutorial(
+        steps: List<TutorialStep>,
+        initialStepIndex: Int = 0,
+        onStepChanged: (Int, TutorialStep) -> Unit,
+        onSkip: () -> Unit,
+        onDone: () -> Unit,
+        onClose: () -> Unit,
+    ): Boolean {
+        Log.i(TAG, "showTutorial stepCount=${steps.size} initialStepIndex=$initialStepIndex")
+        return tutorialController.show(
+            tutorialController = tutorialAnchorController,
+            steps = steps,
+            initialStepIndex = initialStepIndex,
+            onStepChanged = onStepChanged,
+            onSkip = onSkip,
+            onDone = onDone,
+            onClose = onClose,
+        )
+    }
+
+    suspend fun hideTutorial() {
+        Log.i(TAG, "hideTutorial")
+        tutorialController.hide()
+    }
+
+    fun isTutorialVisible(): Boolean = tutorialController.isVisible()
+
     suspend fun hidePanel() {
         Log.i(TAG, "hidePanel")
         panelController.hidePanel()
@@ -207,6 +238,7 @@ class OverlayController(
         clearTargetPoint: Boolean = true,
     ) {
         Log.i(TAG, "hideFloatingMode clearTargetPoint=$clearTargetPoint")
+        tutorialController.hide()
         panelController.hidePanel()
         toolbarController.hide()
         handleController.hide()
@@ -258,6 +290,7 @@ class OverlayController(
     }
 
     fun release() {
+        tutorialController.release()
         panelController.release()
         toolbarController.release()
         handleController.release()
@@ -319,5 +352,6 @@ class OverlayController(
         targetController.applySettings(settings)
         panelController.applySettings(settings)
         handleController.applySettings(settings)
+        tutorialController.applySettings(settings)
     }
 }

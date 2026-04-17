@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -27,6 +28,8 @@ import com.example.clickassist.domain.model.ActionType
 import com.example.clickassist.domain.repository.SettingsRepository
 import com.example.clickassist.service.runner.OverlayPlacementMode
 import com.example.clickassist.service.runner.RunnerState
+import com.example.clickassist.ui.tutorial.TutorialAnchorKeys
+import com.example.clickassist.ui.tutorial.TutorialController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -63,6 +66,7 @@ data class OverlayToolbarCallbacks(
 class OverlayToolbarController(
     context: Context,
     private val settingsRepository: SettingsRepository,
+    private val tutorialController: TutorialController,
 ) {
     private val appContext = context.applicationContext
     private val windowManager = requireNotNull(appContext.getSystemService(WindowManager::class.java))
@@ -117,6 +121,7 @@ class OverlayToolbarController(
                     updateBoundsCache()
                 }
             }
+            updateTutorialAnchors()
         }
     }
 
@@ -157,6 +162,7 @@ class OverlayToolbarController(
                 }
             }.onSuccess {
                 updateBoundsCache()
+                updateTutorialAnchors()
                 Log.i(
                     TAG,
                     "show success taskId=${uiState.activeTaskId} taskName=${uiState.activeTaskName} runnerState=${uiState.runnerState}",
@@ -188,6 +194,7 @@ class OverlayToolbarController(
             }
         }
         updateBoundsCache()
+        updateTutorialAnchors()
     }
 
     suspend fun hide() = withContext(Dispatchers.Main.immediate) {
@@ -222,6 +229,7 @@ class OverlayToolbarController(
             callbacksBound = false
             boundsCache = null
             onBoundsChanged?.invoke(null)
+            clearTutorialAnchors()
         }
     }
 
@@ -538,6 +546,7 @@ class OverlayToolbarController(
             }
         }
         updateBoundsCache()
+        updateTutorialAnchors()
     }
 
     private fun persistCurrentPosition() {
@@ -601,6 +610,7 @@ class OverlayToolbarController(
         }
         boundsCache = null
         onBoundsChanged?.invoke(null)
+        clearTutorialAnchors()
     }
 
     private fun updateBoundsCache() {
@@ -619,6 +629,49 @@ class OverlayToolbarController(
             layoutParams.y + size.height,
         )
         onBoundsChanged?.invoke(boundsCache?.let(::Rect))
+    }
+
+    private fun updateTutorialAnchors() {
+        boundsCache?.let { bounds ->
+            tutorialController.updateAnchor(
+                TutorialAnchorKeys.TOOLBAR_MAIN,
+                RectF(bounds),
+            )
+        } ?: tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_MAIN)
+        updateAnchorForView(TutorialAnchorKeys.TOOLBAR_ADD_NODE, addNodeButton)
+        updateAnchorForView(TutorialAnchorKeys.TOOLBAR_START, startButton)
+        updateAnchorForView(TutorialAnchorKeys.TOOLBAR_SETTINGS, settingsButton)
+    }
+
+    private fun clearTutorialAnchors() {
+        tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_MAIN)
+        tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_ADD_NODE)
+        tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_START)
+        tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_SETTINGS)
+    }
+
+    private fun updateAnchorForView(
+        key: String,
+        view: View?,
+    ) {
+        val bounds = view?.boundsOnScreen()
+        if (bounds == null) {
+            tutorialController.removeAnchor(key)
+        } else {
+            tutorialController.updateAnchor(key, bounds)
+        }
+    }
+
+    private fun View.boundsOnScreen(): RectF? {
+        if (!isAttachedToWindow) return null
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        return RectF(
+            location[0].toFloat(),
+            location[1].toFloat(),
+            location[0].toFloat() + width.toFloat(),
+            location[1].toFloat() + height.toFloat(),
+        )
     }
 
     private fun defaultToolbarX(): Int = dp(12)

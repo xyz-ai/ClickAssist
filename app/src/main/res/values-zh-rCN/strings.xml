@@ -282,4 +282,38 @@
     <string name="settings_about_privacy_summary">ClickAssist 仅保存你显式配置的本地自动化数据，不采集远程隐私信息。</string>
     <string name="settings_value_dp">%1$d dp</string>
     <string name="settings_value_ms">%1$d ms</string>
+
+    <string name="onboarding_header_title">开始使用 ClickAssist</string>
+    <string name="onboarding_header_subtitle">快速了解权限、悬浮工作区和仅本地保存的自动化能力。</string>
+    <string name="onboarding_title_1">本地自动化工作区</string>
+    <string name="onboarding_desc_1">你可以创建点击、长按和滑动方案，并通过悬浮工作台在其他应用上方执行。</string>
+    <string name="onboarding_title_2">悬浮窗权限</string>
+    <string name="onboarding_desc_2">悬浮窗权限用于显示悬浮工具栏、可拖动节点和隐藏后的呼出按钮。</string>
+    <string name="onboarding_title_3">无障碍权限</string>
+    <string name="onboarding_desc_3">无障碍权限用于派发任务步骤中定义的点击、长按和滑动手势。</string>
+    <string name="onboarding_title_4">数据仅保存在本地</string>
+    <string name="onboarding_desc_4">你的方案、步骤和设置都只保存在当前设备，不会同步到云端，也不会远程上传。</string>
+    <string name="onboarding_skip">跳过</string>
+    <string name="onboarding_get_started">开始使用</string>
+
+    <string name="tutorial_title_toolbar">悬浮工具栏</string>
+    <string name="tutorial_desc_toolbar">这里是当前方案的悬浮控制面板。</string>
+    <string name="tutorial_title_add_node">添加节点</string>
+    <string name="tutorial_desc_add_node">点击这里可以新增点击、长按或滑动节点。</string>
+    <string name="tutorial_title_target_marker">步骤节点</string>
+    <string name="tutorial_desc_target_marker">点击节点可选中步骤，拖动节点可更新该步骤的位置。</string>
+    <string name="tutorial_title_start">开始执行</string>
+    <string name="tutorial_desc_start">点击这里可以在悬浮工作区中开始执行当前方案。</string>
+    <string name="tutorial_title_handle">工具栏呼出按钮</string>
+    <string name="tutorial_desc_handle">隐藏工具栏后，可以通过这里重新展开它。</string>
+    <string name="tutorial_skip">跳过</string>
+    <string name="tutorial_next">下一步</string>
+    <string name="tutorial_back">上一步</string>
+    <string name="tutorial_done">完成</string>
+    <string name="reopen_onboarding">重新打开首次引导</string>
+    <string name="reopen_floating_tutorial">重新打开悬浮教程</string>
+    <string name="tutorial_reopen_next_floating_message">下次进入悬浮模式时会再次显示悬浮教程。</string>
+    <string name="tutorial_close">&#20851;&#38381;&#25945;&#31243;</string>
+    <string name="tutorial_close_symbol">×</string>
+    <string name="tutorial_progress">%1$d/%2$d</string>
 </resources>

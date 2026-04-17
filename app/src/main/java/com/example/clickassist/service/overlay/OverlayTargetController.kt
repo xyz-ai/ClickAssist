@@ -3,6 +3,7 @@ package com.example.clickassist.service.overlay
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +19,8 @@ import com.example.clickassist.R
 import com.example.clickassist.domain.model.ScreenPoint
 import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.service.runner.OverlayPlacementMode
+import com.example.clickassist.ui.tutorial.TutorialAnchorKeys
+import com.example.clickassist.ui.tutorial.TutorialController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -47,6 +50,7 @@ data class ScreenGeometrySnapshot(
 
 class OverlayTargetController(
     context: Context,
+    private val tutorialController: TutorialController,
 ) {
     private val appContext = context.applicationContext
     private val windowManager = requireNotNull(appContext.getSystemService(WindowManager::class.java))
@@ -97,6 +101,8 @@ class OverlayTargetController(
             if (currentMarkers.isNotEmpty()) {
                 bindLayer(layerView ?: return@runOnMain)
                 syncMarkersInternal(currentMarkers)
+            } else {
+                updateTargetTutorialAnchor()
             }
         }
     }
@@ -232,6 +238,7 @@ class OverlayTargetController(
         Log.i(TAG, "setMarkerVisibility visible=$visible markerCount=${currentMarkers.size}")
         bindLayer(layer)
         syncMarkersInternal(currentMarkers)
+        updateTargetTutorialAnchor()
         true
     }
 
@@ -249,6 +256,7 @@ class OverlayTargetController(
             }
         }
         syncMarkersInternal(currentMarkers)
+        updateTargetTutorialAnchor()
         true
     }
 
@@ -266,6 +274,7 @@ class OverlayTargetController(
             }
         }
         syncMarkersInternal(currentMarkers)
+        updateTargetTutorialAnchor()
         true
     }
 
@@ -290,6 +299,7 @@ class OverlayTargetController(
             onMarkerChangedCallback = null
             onMarkerDragEndCallback = null
             onMarkerSelectedCallback = null
+            tutorialController.removeAnchor(TutorialAnchorKeys.TARGET_MARKER)
         }
     }
 
@@ -342,6 +352,7 @@ class OverlayTargetController(
                     runCatching { windowManager.removeView(entry.view) }
                 }
             }
+            updateTargetTutorialAnchor()
             return
         }
 
@@ -392,6 +403,7 @@ class OverlayTargetController(
         }
 
         bindLayer(layerView ?: return)
+        updateTargetTutorialAnchor()
         Log.i(TAG, "syncMarkers success visibleCount=${markers.size}")
     }
 
@@ -459,6 +471,7 @@ class OverlayTargetController(
                     }
                 }
                 bindLayer(layerView ?: return true)
+                updateTargetTutorialAnchor()
                 onMarkerChangedCallback?.invoke(markerId, point)
                 true
             }
@@ -547,6 +560,7 @@ class OverlayTargetController(
             currentPoints.clear()
             currentMarkers = emptyList()
         }
+        tutorialController.removeAnchor(TutorialAnchorKeys.TARGET_MARKER)
     }
 
     private fun createMarkerLayoutParams(): WindowManager.LayoutParams {
@@ -711,6 +725,25 @@ class OverlayTargetController(
         Log.i(
             TAG,
             "$prefix screen=${geometry.screenWidth}x${geometry.screenHeight} windowBounds=${geometry.windowBounds} origin=(${geometry.originOnScreenX},${geometry.originOnScreenY}) insets(top=${geometry.statusBarInsetTop},bottom=${geometry.navigationBarInsetBottom},left=${geometry.navigationBarInsetLeft},right=${geometry.navigationBarInsetRight})",
+        )
+    }
+
+    private fun updateTargetTutorialAnchor() {
+        val markerId = currentMarkers.firstOrNull { it.isSelected }?.markerId
+            ?: currentMarkers.firstOrNull()?.markerId
+        val geometry = markerId?.let(::currentMarkerGeometryInternal)
+        if (geometry == null || !markersVisible) {
+            tutorialController.removeAnchor(TutorialAnchorKeys.TARGET_MARKER)
+            return
+        }
+        tutorialController.updateAnchor(
+            TutorialAnchorKeys.TARGET_MARKER,
+            RectF(
+                geometry.left.toFloat(),
+                geometry.top.toFloat(),
+                (geometry.left + geometry.width).toFloat(),
+                (geometry.top + geometry.height).toFloat(),
+            ),
         )
     }
 

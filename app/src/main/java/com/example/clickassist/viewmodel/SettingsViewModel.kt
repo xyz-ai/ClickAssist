@@ -104,6 +104,14 @@ class SettingsViewModel(
         settingsRepository.setDefaultNewStepRepeatCount(repeatCount)
     }
 
+    suspend fun setHasSeenOnboarding(seen: Boolean) {
+        settingsRepository.setHasSeenOnboarding(seen)
+    }
+
+    suspend fun setHasSeenFloatingTutorial(seen: Boolean) {
+        settingsRepository.setHasSeenFloatingTutorial(seen)
+    }
+
     private fun launchUpdate(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
     }

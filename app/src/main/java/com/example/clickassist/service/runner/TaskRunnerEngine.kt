@@ -24,6 +24,9 @@ import com.example.clickassist.service.overlay.OverlayMarkerRole
 import com.example.clickassist.service.overlay.OverlayWaitStepItem
 import com.example.clickassist.service.overlay.OverlayToolbarCallbacks
 import com.example.clickassist.service.overlay.OverlayToolbarUiState
+import com.example.clickassist.ui.tutorial.TutorialAnchorKeys
+import com.example.clickassist.ui.tutorial.TutorialPlacement
+import com.example.clickassist.ui.tutorial.TutorialStep
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +74,40 @@ class TaskRunnerEngine(
     private var pendingSwipeStartPoint: ScreenPoint? = null
     private val runtimeStepGeometryMap = ConcurrentHashMap<Long, RuntimeStepGeometry>()
     private var latestSettings: AppSettings = AppSettings()
+    private var floatingTutorialVisible: Boolean = false
+    private var floatingTutorialForcingHandleStep: Boolean = false
+    private val floatingTutorialSteps = listOf(
+        TutorialStep(
+            key = TutorialAnchorKeys.TOOLBAR_MAIN,
+            titleRes = R.string.tutorial_title_toolbar,
+            descriptionRes = R.string.tutorial_desc_toolbar,
+            placement = TutorialPlacement.RIGHT,
+        ),
+        TutorialStep(
+            key = TutorialAnchorKeys.TOOLBAR_ADD_NODE,
+            titleRes = R.string.tutorial_title_add_node,
+            descriptionRes = R.string.tutorial_desc_add_node,
+            placement = TutorialPlacement.RIGHT,
+        ),
+        TutorialStep(
+            key = TutorialAnchorKeys.TARGET_MARKER,
+            titleRes = R.string.tutorial_title_target_marker,
+            descriptionRes = R.string.tutorial_desc_target_marker,
+            placement = TutorialPlacement.BELOW,
+        ),
+        TutorialStep(
+            key = TutorialAnchorKeys.TOOLBAR_START,
+            titleRes = R.string.tutorial_title_start,
+            descriptionRes = R.string.tutorial_desc_start,
+            placement = TutorialPlacement.RIGHT,
+        ),
+        TutorialStep(
+            key = TutorialAnchorKeys.TOOLBAR_HANDLE,
+            titleRes = R.string.tutorial_title_handle,
+            descriptionRes = R.string.tutorial_desc_handle,
+            placement = TutorialPlacement.RIGHT,
+        ),
+    )
 
     init {
         overlayController.bindToolbarCallbacks(
@@ -198,6 +235,7 @@ class TaskRunnerEngine(
     fun exitFloatingMode() {
         engineScope.launch {
             Log.i(TAG, "exitFloatingMode requested")
+            hideFloatingTutorialInternal(markSeen = false, restoreToolbar = false)
             stopRunnerJobAndResetState(clearError = true)
             overlayController.hideFloatingMode(clearTargetPoint = true)
             clearActiveSessionLocal()
@@ -224,6 +262,22 @@ class TaskRunnerEngine(
         engineScope.launch {
             overlayController.applySettings(latestSettings)
         }
+    }
+
+    fun maybeShowFloatingTutorial() {
+        engineScope.launch {
+            maybeShowFloatingTutorialInternal(force = false)
+        }
+    }
+
+    fun reopenFloatingTutorialIfPossible(): Boolean {
+        if (!_overlaySessionState.value.isFloatingModeEnabled) {
+            return false
+        }
+        engineScope.launch {
+            maybeShowFloatingTutorialInternal(force = true)
+        }
+        return true
     }
 
     fun requestTaskTemplateClone() { /* TODO reserve task template clone entry */
@@ -321,6 +375,7 @@ class TaskRunnerEngine(
         }
         persistVisibleStepGeometriesAsync(loaded)
         publishError(null)
+        maybeShowFloatingTutorialInternal(force = false)
     }
 
     private suspend fun startActiveTaskInternal() {
@@ -594,12 +649,12 @@ class TaskRunnerEngine(
         engineScope.launch { hideToolbarToHandleInternal() }
     }
 
-    private suspend fun hideToolbarToHandleInternal() {
+    private suspend fun hideToolbarToHandleInternal(force: Boolean = false) {
         if (!_overlaySessionState.value.isFloatingModeEnabled) {
             publishError(RunnerError.NoTaskSelected, true)
             return
         }
-        if (!latestSettings.showHandleWhenToolbarHidden) {
+        if (!force && !latestSettings.showHandleWhenToolbarHidden) {
             publishStatusMessage(R.string.overlay_status_hide_toolbar_disabled)
             syncToolbarStateAsync()
             return
@@ -694,6 +749,111 @@ class TaskRunnerEngine(
                     statusMessageRes = R.string.overlay_status_toolbar_expanded,
                 ),
             )
+        }
+    }
+
+    private suspend fun maybeShowFloatingTutorialInternal(force: Boolean) {
+        if (!_overlaySessionState.value.isFloatingModeEnabled) {
+            return
+        }
+        if (floatingTutorialVisible && !force) {
+            return
+        }
+        if (!force && settingsRepository.settingsFlow.first().hasSeenFloatingTutorial) {
+            return
+        }
+        if (floatingTutorialVisible) {
+            hideFloatingTutorialInternal(markSeen = false, restoreToolbar = true)
+        }
+
+        clearPlacementState(syncOverlay = true)
+        activePanelType = null
+        activePanelMessageRes = null
+        overlayController.hidePanel()
+
+        if (_overlaySessionState.value.isToolbarHidden) {
+            restoreToolbarFromHandleInternal()
+        }
+
+        val taskId = activeTaskId ?: return
+        val normalizedTask = taskRepository.getTask(taskId)?.let(::normalizeTaskForRuntime) ?: return
+        val targetVisible = buildMarkerModels(normalizedTask).isNotEmpty()
+        publishOverlaySessionState(
+            createOverlaySessionState(
+                normalizedTask = normalizedTask,
+                isTargetVisible = targetVisible,
+                statusMessageRes = null,
+                isToolbarHidden = false,
+            ),
+        )
+        syncOverlayTargets(normalizedTask)
+
+        val shown = overlayController.showTutorial(
+            steps = floatingTutorialSteps,
+            initialStepIndex = 0,
+            onStepChanged = { index, step ->
+                engineScope.launch {
+                    handleFloatingTutorialStepChangedInternal(index, step)
+                }
+            },
+            onSkip = {
+                engineScope.launch {
+                    hideFloatingTutorialInternal(markSeen = true, restoreToolbar = true)
+                }
+            },
+            onDone = {
+                engineScope.launch {
+                    hideFloatingTutorialInternal(markSeen = true, restoreToolbar = true)
+                }
+            },
+            onClose = {
+                engineScope.launch {
+                    hideFloatingTutorialInternal(markSeen = true, restoreToolbar = true)
+                }
+            },
+        )
+        floatingTutorialVisible = shown
+        floatingTutorialForcingHandleStep = false
+    }
+
+    private suspend fun handleFloatingTutorialStepChangedInternal(
+        stepIndex: Int,
+        step: TutorialStep,
+    ) {
+        val shouldShowHandle = step.key == TutorialAnchorKeys.TOOLBAR_HANDLE
+        Log.i(
+            TAG,
+            "floating tutorial stepChanged index=$stepIndex key=${step.key} shouldShowHandle=$shouldShowHandle",
+        )
+        if (shouldShowHandle && !floatingTutorialForcingHandleStep) {
+            hideToolbarToHandleInternal(force = true)
+            floatingTutorialForcingHandleStep = true
+            return
+        }
+        if (!shouldShowHandle && floatingTutorialForcingHandleStep) {
+            restoreToolbarFromHandleInternal()
+            floatingTutorialForcingHandleStep = false
+        }
+    }
+
+    private suspend fun hideFloatingTutorialInternal(
+        markSeen: Boolean,
+        restoreToolbar: Boolean,
+    ) {
+        if (!floatingTutorialVisible && !floatingTutorialForcingHandleStep) {
+            if (markSeen) {
+                settingsRepository.setHasSeenFloatingTutorial(true)
+            }
+            return
+        }
+        overlayController.hideTutorial()
+        floatingTutorialVisible = false
+        if (restoreToolbar && floatingTutorialForcingHandleStep && _overlaySessionState.value.isFloatingModeEnabled) {
+            restoreToolbarFromHandleInternal()
+        }
+        floatingTutorialForcingHandleStep = false
+        if (markSeen) {
+            settingsRepository.setHasSeenFloatingTutorial(true)
         }
     }
 

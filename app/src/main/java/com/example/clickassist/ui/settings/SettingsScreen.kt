@@ -44,6 +44,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
+    onOpenOnboarding: () -> Unit,
+    onReopenFloatingTutorial: () -> Boolean,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val settings = uiState.settings
@@ -56,7 +58,7 @@ fun SettingsScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull().orEmpty()
     }
-    val tutorialComingSoon = stringResource(R.string.settings_about_tutorial_coming_soon)
+    val floatingTutorialDeferredMessage = stringResource(R.string.tutorial_reopen_next_floating_message)
     val onLanguageSelected: (AppLanguage) -> Unit = remember(
         viewModel,
         settings.languageMode,
@@ -244,11 +246,25 @@ fun SettingsScreen(
                     TextButton(
                         onClick = {
                             scope.launch {
-                                snackbarHostState.showSnackbar(message = tutorialComingSoon)
+                                viewModel.setHasSeenOnboarding(false)
+                                onOpenOnboarding()
                             }
                         },
                     ) {
-                        Text(text = stringResource(R.string.settings_about_reopen_tutorial))
+                        Text(text = stringResource(R.string.reopen_onboarding))
+                    }
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                viewModel.setHasSeenFloatingTutorial(false)
+                                val shownImmediately = onReopenFloatingTutorial()
+                                if (!shownImmediately) {
+                                    snackbarHostState.showSnackbar(message = floatingTutorialDeferredMessage)
+                                }
+                            }
+                        },
+                    ) {
+                        Text(text = stringResource(R.string.reopen_floating_tutorial))
                     }
                     DescriptionBlock(
                         title = stringResource(R.string.settings_about_privacy),

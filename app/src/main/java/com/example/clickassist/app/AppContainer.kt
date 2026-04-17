@@ -13,8 +13,10 @@ import com.example.clickassist.service.overlay.OverlayHandleController
 import com.example.clickassist.service.overlay.OverlayPanelController
 import com.example.clickassist.service.overlay.OverlayTargetController
 import com.example.clickassist.service.overlay.OverlayToolbarController
+import com.example.clickassist.service.overlay.OverlayTutorialController
 import com.example.clickassist.service.runner.TaskStartValidator
 import com.example.clickassist.service.runner.TaskRunnerEngine
+import com.example.clickassist.ui.tutorial.TutorialController
 
 class ClickAssistApplication : Application() {
     val container: AppContainer by lazy {
@@ -26,6 +28,7 @@ interface AppContainer {
     val appContext: Context
     val taskRepository: TaskRepository
     val settingsRepository: SettingsRepository
+    val tutorialController: TutorialController
     val overlayController: OverlayController
     val taskRunnerEngine: TaskRunnerEngine
 }
@@ -53,15 +56,23 @@ class DefaultAppContainer(
         DataStoreSettingsRepository(context = appContext)
     }
 
+    override val tutorialController: TutorialController by lazy {
+        TutorialController()
+    }
+
     private val overlayToolbarController: OverlayToolbarController by lazy {
         OverlayToolbarController(
             context = appContext,
             settingsRepository = settingsRepository,
+            tutorialController = tutorialController,
         )
     }
 
     private val overlayTargetController: OverlayTargetController by lazy {
-        OverlayTargetController(context = appContext)
+        OverlayTargetController(
+            context = appContext,
+            tutorialController = tutorialController,
+        )
     }
 
     private val overlayPanelController: OverlayPanelController by lazy {
@@ -72,7 +83,12 @@ class DefaultAppContainer(
         OverlayHandleController(
             context = appContext,
             settingsRepository = settingsRepository,
+            tutorialController = tutorialController,
         )
+    }
+
+    private val overlayTutorialController: OverlayTutorialController by lazy {
+        OverlayTutorialController(context = appContext)
     }
 
     override val overlayController: OverlayController by lazy {
@@ -81,6 +97,8 @@ class DefaultAppContainer(
             targetController = overlayTargetController,
             panelController = overlayPanelController,
             handleController = overlayHandleController,
+            tutorialController = overlayTutorialController,
+            tutorialAnchorController = tutorialController,
         )
     }
 

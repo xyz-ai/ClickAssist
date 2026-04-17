@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -22,6 +23,8 @@ import android.widget.TextView
 import com.example.clickassist.R
 import com.example.clickassist.domain.repository.AppSettings
 import com.example.clickassist.domain.repository.SettingsRepository
+import com.example.clickassist.ui.tutorial.TutorialAnchorKeys
+import com.example.clickassist.ui.tutorial.TutorialController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +38,7 @@ import kotlin.math.roundToInt
 class OverlayHandleController(
     context: Context,
     private val settingsRepository: SettingsRepository,
+    private val tutorialController: TutorialController,
 ) {
     private val appContext = context.applicationContext
     private val windowManager = requireNotNull(appContext.getSystemService(WindowManager::class.java))
@@ -64,6 +68,7 @@ class OverlayHandleController(
             }
             handleButton?.setTextColor(currentAppearance.textPrimaryColor)
             handleLayoutParams?.let { updateArrowDirection(it.x) }
+            updateTutorialAnchor()
         }
     }
 
@@ -102,6 +107,7 @@ class OverlayHandleController(
                 }
             }.onSuccess {
                 updateBoundsCache()
+                updateTutorialAnchor()
                 Log.i(TAG, "handle show success x=${layoutParams.x} y=${layoutParams.y}")
             }.onFailure { throwable ->
                 Log.e(TAG, "handle show failed", throwable)
@@ -123,6 +129,7 @@ class OverlayHandleController(
             boundsCache = null
             onExpandRequested = null
             onBoundsChanged?.invoke(null)
+            clearTutorialAnchor()
         }
     }
 
@@ -195,6 +202,7 @@ class OverlayHandleController(
             }
         }
         updateBoundsCache()
+        updateTutorialAnchor()
     }
 
     private fun persistCurrentPosition() {
@@ -285,6 +293,23 @@ class OverlayHandleController(
         }
         boundsCache = null
         onBoundsChanged?.invoke(null)
+        clearTutorialAnchor()
+    }
+
+    private fun updateTutorialAnchor() {
+        val bounds = boundsCache
+        if (bounds == null) {
+            clearTutorialAnchor()
+            return
+        }
+        tutorialController.updateAnchor(
+            TutorialAnchorKeys.TOOLBAR_HANDLE,
+            RectF(bounds),
+        )
+    }
+
+    private fun clearTutorialAnchor() {
+        tutorialController.removeAnchor(TutorialAnchorKeys.TOOLBAR_HANDLE)
     }
 
     private fun defaultHandleX(): Int = dp(8)

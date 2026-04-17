@@ -43,7 +43,10 @@ class MainActivity : AppCompatActivity() {
 
             ClickAssistTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    AppNavHost(appContainer = applicationContext.appContainer)
+                    AppNavHost(
+                        appContainer = applicationContext.appContainer,
+                        showOnboardingInitially = !initialSettings.hasSeenOnboarding,
+                    )
                 }
             }
         }

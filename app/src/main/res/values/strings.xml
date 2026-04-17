@@ -282,4 +282,38 @@
     <string name="settings_about_privacy_summary">ClickAssist only stores configuration locally for your own explicit automation setup.</string>
     <string name="settings_value_dp">%1$d dp</string>
     <string name="settings_value_ms">%1$d ms</string>
+
+    <string name="onboarding_header_title">Get started with ClickAssist</string>
+    <string name="onboarding_header_subtitle">A quick walkthrough of permissions, floating controls and local-only automation.</string>
+    <string name="onboarding_title_1">Local automation workspace</string>
+    <string name="onboarding_desc_1">Build tap, long press and swipe schemes, then launch them from the floating workspace above other apps.</string>
+    <string name="onboarding_title_2">Overlay permission</string>
+    <string name="onboarding_desc_2">Overlay permission is required to show the floating toolbar, draggable markers and handle on top of other apps.</string>
+    <string name="onboarding_title_3">Accessibility permission</string>
+    <string name="onboarding_desc_3">Accessibility is required to dispatch the tap, long press and swipe gestures defined by your task steps.</string>
+    <string name="onboarding_title_4">Local data only</string>
+    <string name="onboarding_desc_4">Your schemes, steps and settings stay on this device. No cloud sync, account login or remote upload is used.</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_get_started">Get started</string>
+
+    <string name="tutorial_title_toolbar">Floating toolbar</string>
+    <string name="tutorial_desc_toolbar">This is the floating control panel for your current scheme.</string>
+    <string name="tutorial_title_add_node">Add a node</string>
+    <string name="tutorial_desc_add_node">Use this button to add a new tap, long press or swipe node.</string>
+    <string name="tutorial_title_target_marker">Step marker</string>
+    <string name="tutorial_desc_target_marker">Tap a marker to select the step, or drag it to update the step position.</string>
+    <string name="tutorial_title_start">Start execution</string>
+    <string name="tutorial_desc_start">Use this button to start the current scheme from the floating workspace.</string>
+    <string name="tutorial_title_handle">Toolbar handle</string>
+    <string name="tutorial_desc_handle">After hiding the toolbar, use this handle to bring it back.</string>
+    <string name="tutorial_skip">Skip</string>
+    <string name="tutorial_next">Next</string>
+    <string name="tutorial_back">Back</string>
+    <string name="tutorial_done">Done</string>
+    <string name="tutorial_close">Close tutorial</string>
+    <string name="tutorial_close_symbol">×</string>
+    <string name="tutorial_progress">%1$d/%2$d</string>
+    <string name="reopen_onboarding">Reopen onboarding</string>
+    <string name="reopen_floating_tutorial">Reopen floating tutorial</string>
+    <string name="tutorial_reopen_next_floating_message">The floating tutorial will show the next time you enter floating mode.</string>
 </resources>

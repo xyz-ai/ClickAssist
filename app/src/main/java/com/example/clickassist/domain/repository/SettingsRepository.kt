@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.Flow
 data class AppSettings(
     val languageMode: AppLanguage = AppLanguage.ENGLISH,
     val themeMode: AppThemeMode = AppThemeMode.FOLLOW_SYSTEM,
+    val hasSeenOnboarding: Boolean = false,
+    val hasSeenFloatingTutorial: Boolean = false,
     val toolbarDefaultExpanded: Boolean = true,
     val showHandleWhenToolbarHidden: Boolean = true,
     val markerSizeDp: Int = 56,
@@ -33,6 +35,10 @@ interface SettingsRepository {
     suspend fun setLanguageMode(languageMode: AppLanguage)
 
     suspend fun setThemeMode(themeMode: AppThemeMode)
+
+    suspend fun setHasSeenOnboarding(seen: Boolean)
+
+    suspend fun setHasSeenFloatingTutorial(seen: Boolean)
 
     suspend fun setToolbarDefaultExpanded(expanded: Boolean)
 

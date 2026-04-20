@@ -1,6 +1,6 @@
 ---
 name: overlay-tutorial-bugfix
-description: Fix floating onboarding and overlay tutorial bugs in ClickAssist, especially blocked tutorial flows, missing navigation buttons, swallowed clicks, unreachable dismiss actions, and tutorial cards drifting off-screen. Prefer minimal, targeted fixes to TutorialOverlay, OverlayTutorialHost, settings flags, and string resources.
+description: Fix floating onboarding and overlay tutorial bugs in ClickAssist, especially blocked tutorial flows, missing navigation buttons, swallowed clicks, unreachable dismiss actions, tutorial cards drifting off-screen, and action bars placed outside safe bounds on different Android ROMs. Prefer minimal, targeted fixes to TutorialOverlay, OverlayTutorialHost, settings flags, and string resources.
 ---
 
 # Overlay Tutorial Bugfix Skill
@@ -14,6 +14,8 @@ Use this skill when the task is specifically about the floating tutorial / overl
 - buttons exist visually but are not clickable
 - tutorial seen-state is not persisted correctly
 - floating tutorial strings need resourceized multilingual labels
+- tutorial card and action controls become misaligned relative to the floating toolbar
+- tutorial action controls are pushed below the screen on some devices such as OPPO
 
 ## Primary goal
 Restore a complete and safe tutorial interaction loop.
@@ -29,7 +31,7 @@ The user must always be able to:
 1. Do not redesign the entire overlay system.
 2. Modify the smallest correct set of files.
 3. Keep the tutorial flow visible and dismissible at all times.
-4. Prefer fixed bottom action controls over controls that drift with the target rect.
+4. Prefer fixed tutorial action controls over drifting controls.
 5. Keep all button text resourceized.
 6. Preserve English default + Chinese support.
 
@@ -63,13 +65,32 @@ There must be a visible close action, such as:
 - top-right X
 - or equivalent always-visible dismiss button
 
-### 4. Can the card go off-screen?
-When targetRect is near screen edges:
-- clamp the tutorial card position
-- keep action buttons visible
-- prefer a fixed bottom control bar if dynamic placement is unstable
+### 4. Is the tutorial action bar anchored correctly?
+The tutorial action bar must:
+- be visually attached to the tutorial layout, not independently pinned to screen bottom
+- prefer placement below the floating toolbar / highlighted target group
+- if below-space is insufficient, fall back above the highlighted target group
+- never be positioned outside the viewport
+- never depend on raw screen-bottom anchoring alone
 
-### 5. Is tutorial completion persisted?
+### 5. Is the tutorial layout treated as one bounded block?
+Treat the tutorial card and action bar as one layout block:
+- description card
+- progress text
+- action row
+
+This block must be clamped together inside screen bounds.
+Do not allow the card to follow the target while the action row drifts to the phone bottom.
+
+### 6. Can the card or controls go off-screen?
+When targetRect is near screen edges:
+- clamp the tutorial block position
+- keep action buttons visible
+- prioritize button visibility over ideal card placement
+- reduce available content width if needed
+- account for system bars, gesture insets, display cutouts, and navigation bars
+
+### 7. Is tutorial completion persisted?
 Ensure:
 - Skip marks `hasSeenFloatingTutorial = true`
 - Done marks `hasSeenFloatingTutorial = true`
@@ -116,11 +137,22 @@ Prefer this structure:
 - full-screen dim layer
 - highlighted target region
 - tutorial description card
-- fixed bottom action row
+- tutorial action bar anchored to the tutorial block near the floating toolbar, not to raw screen bottom
 
-If a dynamic card position is used:
+If dynamic card position is used:
 - clamp it inside the screen
-- never let action controls leave the viewport
+- clamp the action bar together with the card
+- keep action controls away from unsafe bottom inset areas
+- preserve clickability on OEM ROMs with different navigation behaviors
+
+## Device compatibility checks
+When behavior differs across devices such as Xiaomi vs OPPO, inspect:
+- screen coordinates vs window coordinates
+- status bar offset handling
+- navigation bar / gesture inset handling
+- whether targetRect is measured before overlay layout is ready
+- whether overlay root size is stale during positioning
+- whether controls are placed using absolute bottom anchoring instead of bounded block placement
 
 ## Output style for Codex
 When using this skill:
@@ -129,6 +161,7 @@ When using this skill:
 3. Keep changes tightly scoped to tutorial behavior.
 4. Ensure the result is compileable.
 5. Do not rewrite unrelated overlay logic.
+6. If fixing layout, explain the coordinate / inset bug briefly before coding.
 
 ## Completion checklist
 A correct fix must ensure:
@@ -139,3 +172,4 @@ A correct fix must ensure:
 - card and controls stay on-screen
 - completion state is persisted
 - multilingual strings are present
+- action controls stay near the floating toolbar and do not fall below the screen on OEM devices

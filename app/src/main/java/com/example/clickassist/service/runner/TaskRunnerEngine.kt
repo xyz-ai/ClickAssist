@@ -25,8 +25,10 @@ import com.example.clickassist.service.overlay.OverlayWaitStepItem
 import com.example.clickassist.service.overlay.OverlayToolbarCallbacks
 import com.example.clickassist.service.overlay.OverlayToolbarUiState
 import com.example.clickassist.ui.tutorial.TutorialAnchorKeys
+import com.example.clickassist.ui.tutorial.TutorialActionKey
 import com.example.clickassist.ui.tutorial.TutorialPlacement
 import com.example.clickassist.ui.tutorial.TutorialStep
+import com.example.clickassist.ui.tutorial.TutorialStepKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +78,7 @@ class TaskRunnerEngine(
     private var latestSettings: AppSettings = AppSettings()
     private var floatingTutorialVisible: Boolean = false
     private var floatingTutorialForcingHandleStep: Boolean = false
+    private var floatingTutorialStepIndex: Int = 0
     private val floatingTutorialSteps = listOf(
         TutorialStep(
             key = TutorialAnchorKeys.TOOLBAR_MAIN,
@@ -88,24 +91,32 @@ class TaskRunnerEngine(
             titleRes = R.string.tutorial_title_add_node,
             descriptionRes = R.string.tutorial_desc_add_node,
             placement = TutorialPlacement.RIGHT,
+            kind = TutorialStepKind.ACTION_OPTIONAL,
+            actionKey = TutorialActionKey.ADD_NODE,
         ),
         TutorialStep(
             key = TutorialAnchorKeys.TARGET_MARKER,
             titleRes = R.string.tutorial_title_target_marker,
             descriptionRes = R.string.tutorial_desc_target_marker,
             placement = TutorialPlacement.BELOW,
+            kind = TutorialStepKind.ACTION_OPTIONAL,
+            actionKey = TutorialActionKey.TARGET_MARKER,
         ),
         TutorialStep(
             key = TutorialAnchorKeys.TOOLBAR_START,
             titleRes = R.string.tutorial_title_start,
             descriptionRes = R.string.tutorial_desc_start,
             placement = TutorialPlacement.RIGHT,
+            kind = TutorialStepKind.ACTION_OPTIONAL,
+            actionKey = TutorialActionKey.START,
         ),
         TutorialStep(
             key = TutorialAnchorKeys.TOOLBAR_HANDLE,
             titleRes = R.string.tutorial_title_handle,
             descriptionRes = R.string.tutorial_desc_handle,
             placement = TutorialPlacement.RIGHT,
+            kind = TutorialStepKind.ACTION_OPTIONAL,
+            actionKey = TutorialActionKey.HANDLE,
         ),
     )
 
@@ -289,6 +300,7 @@ class TaskRunnerEngine(
             "toolbar start clicked state=${_runnerState.value} floatingMode=${_overlaySessionState.value.isFloatingModeEnabled}",
         )
         startActiveTask()
+        advanceFloatingTutorialAfterAction(TutorialActionKey.START)
     }
 
     private fun handleToolbarPauseRequested() {
@@ -313,6 +325,7 @@ class TaskRunnerEngine(
             "toolbar add node clicked taskId=$activeTaskId hidden=${_overlaySessionState.value.isToolbarHidden}",
         )
         togglePanel(OverlayPanelType.ADD_NODE)
+        advanceFloatingTutorialAfterAction(TutorialActionKey.ADD_NODE)
     }
 
     private fun handleToolbarSettingsRequested() {
@@ -512,6 +525,8 @@ class TaskRunnerEngine(
                     x = point.x,
                     y = point.y,
                     durationMs = defaultDurationFor(actionType),
+                    preDelayMs = defaultPreDelayFor(actionType),
+                    postDelayMs = defaultPostDelayFor(actionType),
                 ),
             )
             ordered
@@ -547,6 +562,8 @@ class TaskRunnerEngine(
                     endX = end.x,
                     endY = end.y,
                     durationMs = defaultDurationFor(ActionType.SWIPE),
+                    preDelayMs = defaultPreDelayFor(ActionType.SWIPE),
+                    postDelayMs = defaultPostDelayFor(ActionType.SWIPE),
                 ),
             )
             ordered
@@ -709,7 +726,10 @@ class TaskRunnerEngine(
             ACTION_TAG,
             "restore toolbar requested taskId=$activeTaskId hidden=${_overlaySessionState.value.isToolbarHidden}",
         )
-        engineScope.launch { restoreToolbarFromHandleInternal() }
+        engineScope.launch {
+            restoreToolbarFromHandleInternal()
+            advanceFloatingTutorialAfterAction(TutorialActionKey.HANDLE)
+        }
     }
 
     private suspend fun restoreToolbarFromHandleInternal() {
@@ -814,12 +834,14 @@ class TaskRunnerEngine(
         )
         floatingTutorialVisible = shown
         floatingTutorialForcingHandleStep = false
+        floatingTutorialStepIndex = 0
     }
 
     private suspend fun handleFloatingTutorialStepChangedInternal(
         stepIndex: Int,
         step: TutorialStep,
     ) {
+        floatingTutorialStepIndex = stepIndex
         val shouldShowHandle = step.key == TutorialAnchorKeys.TOOLBAR_HANDLE
         Log.i(
             TAG,
@@ -848,12 +870,44 @@ class TaskRunnerEngine(
         }
         overlayController.hideTutorial()
         floatingTutorialVisible = false
+        floatingTutorialStepIndex = 0
         if (restoreToolbar && floatingTutorialForcingHandleStep && _overlaySessionState.value.isFloatingModeEnabled) {
             restoreToolbarFromHandleInternal()
         }
         floatingTutorialForcingHandleStep = false
         if (markSeen) {
             settingsRepository.setHasSeenFloatingTutorial(true)
+        }
+    }
+
+    private fun advanceFloatingTutorialAfterAction(
+        actionKey: TutorialActionKey,
+    ) {
+        if (!floatingTutorialVisible) return
+        val currentStep = floatingTutorialSteps.getOrNull(floatingTutorialStepIndex) ?: return
+        if (currentStep.kind != TutorialStepKind.ACTION_OPTIONAL || currentStep.actionKey != actionKey) {
+            Log.i(
+                TAG,
+                "floating tutorial action ignored actionKey=$actionKey currentIndex=$floatingTutorialStepIndex currentAction=${currentStep.actionKey}",
+            )
+            return
+        }
+
+        val nextIndex = floatingTutorialStepIndex + 1
+        Log.i(
+            TAG,
+            "floating tutorial action matched actionKey=$actionKey currentIndex=$floatingTutorialStepIndex nextIndex=$nextIndex",
+        )
+        if (nextIndex <= floatingTutorialSteps.lastIndex) {
+            floatingTutorialStepIndex = nextIndex
+            overlayController.setTutorialStepIndex(nextIndex)
+        } else {
+            engineScope.launch {
+                hideFloatingTutorialInternal(
+                    markSeen = true,
+                    restoreToolbar = actionKey != TutorialActionKey.HANDLE,
+                )
+            }
         }
     }
 
@@ -1247,6 +1301,7 @@ class TaskRunnerEngine(
             )
             syncActivePanel(normalized)
             Log.i(TAG, "marker selection synced markerId=$markerId taskId=$taskId selectedStepId=$selectedStepId")
+            advanceFloatingTutorialAfterAction(TutorialActionKey.TARGET_MARKER)
         }
     }
 
@@ -2148,6 +2203,8 @@ class TaskRunnerEngine(
                     orderIndex = insertIndex,
                     actionType = actionType.storageValue,
                     durationMs = defaultDurationFor(actionType),
+                    preDelayMs = defaultPreDelayFor(actionType),
+                    postDelayMs = defaultPostDelayFor(actionType),
                 ),
             )
             ordered
@@ -2654,6 +2711,14 @@ class TaskRunnerEngine(
             ActionType.WAIT -> 1000L
         }
     }
+
+    private fun defaultPreDelayFor(
+        actionType: ActionType,
+    ): Long = if (actionType == ActionType.TAP) 100L else 0L
+
+    private fun defaultPostDelayFor(
+        actionType: ActionType,
+    ): Long = if (actionType == ActionType.TAP) 200L else 0L
 
     private fun selectStep(
         taskWithSteps: TaskWithSteps,

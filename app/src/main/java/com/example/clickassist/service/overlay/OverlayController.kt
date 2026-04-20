@@ -165,7 +165,8 @@ class OverlayController(
         onClose: () -> Unit,
     ): Boolean {
         Log.i(TAG, "showTutorial stepCount=${steps.size} initialStepIndex=$initialStepIndex")
-        return tutorialController.show(
+        toolbarController.setDragLocked(true)
+        val shown = tutorialController.show(
             tutorialController = tutorialAnchorController,
             steps = steps,
             initialStepIndex = initialStepIndex,
@@ -174,11 +175,21 @@ class OverlayController(
             onDone = onDone,
             onClose = onClose,
         )
+        if (!shown) {
+            toolbarController.setDragLocked(false)
+        }
+        return shown
     }
 
     suspend fun hideTutorial() {
         Log.i(TAG, "hideTutorial")
         tutorialController.hide()
+        toolbarController.setDragLocked(false)
+    }
+
+    fun setTutorialStepIndex(index: Int) {
+        Log.i(TAG, "setTutorialStepIndex index=$index")
+        tutorialController.setStepIndex(index)
     }
 
     fun isTutorialVisible(): Boolean = tutorialController.isVisible()
@@ -239,6 +250,7 @@ class OverlayController(
     ) {
         Log.i(TAG, "hideFloatingMode clearTargetPoint=$clearTargetPoint")
         tutorialController.hide()
+        toolbarController.setDragLocked(false)
         panelController.hidePanel()
         toolbarController.hide()
         handleController.hide()
@@ -291,6 +303,7 @@ class OverlayController(
 
     fun release() {
         tutorialController.release()
+        toolbarController.setDragLocked(false)
         panelController.release()
         toolbarController.release()
         handleController.release()

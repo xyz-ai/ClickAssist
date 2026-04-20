@@ -608,6 +608,8 @@ class TaskEditViewModel(
             intervalMs = safeSettings.defaultStepIntervalMs.toString(),
             durationMs = defaultDurationFor(actionType, safeSettings).toString(),
             repeatCount = safeSettings.defaultNewStepRepeatCount.toString(),
+            preDelayMs = if (actionType == ActionType.TAP) "100" else "0",
+            postDelayMs = if (actionType == ActionType.TAP) "200" else "0",
         )
         Log.i(
             DRAFT_TAG,

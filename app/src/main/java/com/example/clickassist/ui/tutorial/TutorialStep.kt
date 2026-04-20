@@ -9,11 +9,25 @@ enum class TutorialPlacement {
     RIGHT,
 }
 
+enum class TutorialStepKind {
+    INFO,
+    ACTION_OPTIONAL,
+}
+
+enum class TutorialActionKey {
+    ADD_NODE,
+    TARGET_MARKER,
+    START,
+    HANDLE,
+}
+
 data class TutorialStep(
     val key: String,
     @StringRes val titleRes: Int,
     @StringRes val descriptionRes: Int,
     val placement: TutorialPlacement,
+    val kind: TutorialStepKind = TutorialStepKind.INFO,
+    val actionKey: TutorialActionKey? = null,
 )
 
 object TutorialAnchorKeys {

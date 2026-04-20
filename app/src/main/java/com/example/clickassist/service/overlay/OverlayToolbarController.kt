@@ -89,6 +89,7 @@ class OverlayToolbarController(
 
     private var callbacks: OverlayToolbarCallbacks = OverlayToolbarCallbacks()
     private var callbacksBound: Boolean = false
+    private var isDragLocked: Boolean = false
     private var currentSettings: AppSettings = AppSettings()
     private var currentAppearance: OverlayAppearance = OverlayAppearance.fromSettings(appContext, currentSettings)
     private var currentUiState = OverlayToolbarUiState(
@@ -100,6 +101,13 @@ class OverlayToolbarController(
     fun hasPermission(): Boolean = Settings.canDrawOverlays(appContext)
 
     fun currentBounds(): Rect? = boundsCache?.let(::Rect)
+
+    fun setDragLocked(locked: Boolean) {
+        runOnMain {
+            isDragLocked = locked
+            toolbarView?.isDragEnabled = !locked
+        }
+    }
 
     fun applySettings(settings: AppSettings) {
         currentSettings = settings
@@ -227,6 +235,7 @@ class OverlayToolbarController(
             toggleTargetButton = null
             statusTextView = null
             callbacksBound = false
+            isDragLocked = false
             boundsCache = null
             onBoundsChanged?.invoke(null)
             clearTutorialAnchors()
@@ -240,6 +249,7 @@ class OverlayToolbarController(
             clipChildren = false
             clipToPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            isDragEnabled = !isDragLocked
             onDragBy = { deltaX, deltaY ->
                 moveToolbarBy(deltaX, deltaY)
             }
@@ -730,6 +740,13 @@ class OverlayToolbarController(
     ) : FrameLayout(context) {
         var onDragBy: ((Float, Float) -> Unit)? = null
         var onDragEnd: (() -> Unit)? = null
+        var isDragEnabled: Boolean = true
+            set(value) {
+                field = value
+                if (!value) {
+                    dragging = false
+                }
+            }
 
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
         private var downRawX = 0f
@@ -739,6 +756,9 @@ class OverlayToolbarController(
         private var dragging = false
 
         override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            if (!isDragEnabled) {
+                return super.onInterceptTouchEvent(ev)
+            }
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = ev.rawX
@@ -765,6 +785,9 @@ class OverlayToolbarController(
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (!isDragEnabled) {
+                return super.onTouchEvent(event)
+            }
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX

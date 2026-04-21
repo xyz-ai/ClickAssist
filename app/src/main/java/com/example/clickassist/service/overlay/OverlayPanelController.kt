@@ -40,6 +40,7 @@ class OverlayPanelController(
     private var panelLayoutParams: WindowManager.LayoutParams? = null
     private var titleTextView: TextView? = null
     private var messageTextView: TextView? = null
+    private var scrollContainer: ScrollView? = null
     private var contentHost: FrameLayout? = null
     private var onCloseRequested: (() -> Unit)? = null
     private var boundsCache: Rect? = null
@@ -98,6 +99,7 @@ class OverlayPanelController(
             panelLayoutParams = null
             titleTextView = null
             messageTextView = null
+            scrollContainer = null
             contentHost = null
             boundsCache = null
             onBoundsChanged?.invoke(null)
@@ -115,13 +117,14 @@ class OverlayPanelController(
                 text = appContext.getString(messageRes)
             }
         }
+        scrollContainer?.applyContentHeight(spec)
         contentHost?.apply {
             removeAllViews()
             addView(
                 createContentView(spec),
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
                 ),
             )
         }
@@ -173,11 +176,11 @@ class OverlayPanelController(
             visibility = View.GONE
         }
 
-        val scrollContainer = ScrollView(appContext).apply {
+        scrollContainer = ScrollView(appContext).apply {
             isFillViewport = true
         }
         contentHost = FrameLayout(appContext)
-        scrollContainer.addView(
+        scrollContainer?.addView(
             contentHost,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -297,6 +300,17 @@ class OverlayPanelController(
             appContext.resources.displayMetrics.heightPixels
         }.coerceAtLeast(dp(320))
         return (screenHeight * 0.72f).roundToInt()
+    }
+
+    private fun ScrollView.applyContentHeight(spec: OverlayPanelSpec) {
+        isFillViewport = spec !is OverlayPanelSpec.AddNode
+        val params = layoutParams as? LinearLayout.LayoutParams
+        params?.height = if (spec is OverlayPanelSpec.AddNode) {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        } else {
+            panelHeightPx()
+        }
+        layoutParams = params
     }
 
     private fun dp(value: Int): Int {

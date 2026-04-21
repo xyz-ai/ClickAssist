@@ -261,7 +261,7 @@ class OverlayToolbarController(
         val container = LinearLayout(appContext).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setPadding(dp(7), dp(7), dp(7), dp(7))
         }
         containerView = container
 
@@ -326,7 +326,9 @@ class OverlayToolbarController(
 
         statusTextView = TextView(appContext).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            setPadding(dp(6), dp(10), dp(6), dp(2))
+            maxWidth = dp(108)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(2))
         }.also { view ->
             container.addView(
                 view,
@@ -459,9 +461,9 @@ class OverlayToolbarController(
     ): TextView {
         return TextView(appContext).apply {
             gravity = Gravity.CENTER
-            minWidth = dp(96)
-            minHeight = dp(42)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            minWidth = dp(92)
+            minHeight = dp(40)
+            setPadding(dp(12), dp(9), dp(12), dp(9))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             text = appContext.getString(labelRes)
             contentDescription = text
@@ -479,7 +481,7 @@ class OverlayToolbarController(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply {
                 if (childCount > 0) {
-                    topMargin = dp(6)
+                    topMargin = dp(5)
                 }
             },
         )
@@ -502,28 +504,30 @@ class OverlayToolbarController(
     private fun applyAppearanceInternal() {
         containerView?.background = GradientDrawable().apply {
             setColor(currentAppearance.toolbarBackgroundColor)
-            cornerRadius = dpFloat(22)
+            cornerRadius = dpFloat(24)
+            setStroke(dp(1), currentAppearance.panelBorderColor)
         }
         applyButtonStyle(startButton, currentAppearance.primaryActionColor)
         applyButtonStyle(pauseButton, currentAppearance.warningActionColor)
         applyButtonStyle(stopButton, currentAppearance.dangerActionColor)
-        applyButtonStyle(addNodeButton, currentAppearance.neutralActionColor)
+        applyButtonStyle(addNodeButton, currentAppearance.surfaceVariantColor, currentAppearance.textPrimaryColor)
         applyButtonStyle(deleteButton, currentAppearance.dangerActionColor)
-        applyButtonStyle(settingsButton, currentAppearance.primaryActionColor)
-        applyButtonStyle(toggleTargetButton, currentAppearance.neutralActionColor)
+        applyButtonStyle(settingsButton, currentAppearance.surfaceVariantColor, currentAppearance.textPrimaryColor)
+        applyButtonStyle(toggleTargetButton, currentAppearance.surfaceVariantColor, currentAppearance.textPrimaryColor)
         statusTextView?.setTextColor(currentAppearance.toolbarStatusTextColor)
     }
 
     private fun applyButtonStyle(
         button: TextView?,
         backgroundColor: Int,
+        textColor: Int = currentAppearance.toolbarButtonTextColor,
     ) {
         button ?: return
         button.background = GradientDrawable().apply {
             setColor(backgroundColor)
-            cornerRadius = dpFloat(18)
+            cornerRadius = dpFloat(16)
         }
-        button.setTextColor(currentAppearance.toolbarButtonTextColor)
+        button.setTextColor(textColor)
     }
 
     @StringRes

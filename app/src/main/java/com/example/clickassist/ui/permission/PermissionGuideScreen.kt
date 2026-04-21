@@ -6,14 +6,17 @@ import android.provider.Settings
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -115,10 +118,10 @@ fun PermissionGuideScreen(
                 },
             )
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            PolishedCard {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.permission_local_data_title),
@@ -146,10 +149,10 @@ fun PermissionGuideScreen(
                 }
             }
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            PolishedCard {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.permission_summary_title),
@@ -200,10 +203,10 @@ private fun PermissionCard(
     @StringRes actionTextRes: Int,
     onAction: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    PolishedCard {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = stringResource(titleRes),
@@ -213,6 +216,7 @@ private fun PermissionCard(
             Text(
                 text = stringResource(descriptionRes),
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -224,6 +228,7 @@ private fun PermissionCard(
                         stringResource(statusTextRes),
                     ),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
                 TextButton(onClick = onAction) {
                     Text(text = stringResource(actionTextRes))
@@ -231,4 +236,19 @@ private fun PermissionCard(
             }
         }
     }
+}
+
+@Composable
+private fun PolishedCard(
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        content = content,
+    )
 }

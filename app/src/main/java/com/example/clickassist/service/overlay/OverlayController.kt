@@ -245,6 +245,17 @@ class OverlayController(
         return updated
     }
 
+    suspend fun ensureToolbarRecoverable(
+        isToolbarHidden: Boolean,
+    ): Boolean {
+        Log.i(TAG, "ensureToolbarRecoverable hidden=$isToolbarHidden")
+        return if (isToolbarHidden) {
+            hideToolbarToHandle()
+        } else {
+            showToolbarFromHandle()
+        }
+    }
+
     suspend fun hideFloatingMode(
         clearTargetPoint: Boolean = true,
     ) {

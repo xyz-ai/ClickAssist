@@ -370,6 +370,8 @@ class TaskRunnerEngine(
         stopRunnerJobAndResetState(clearError = true)
         overlayController.hideFloatingMode(clearTargetPoint = true)
         clearActiveSessionLocal()
+        publishOverlaySessionState(OverlaySessionState())
+        Log.i(TAG, "enterFloatingMode reset overlay session before fresh show taskId=$taskId")
         activePanelType = null
         activePanelMessageRes = null
         placementMode = OverlayPlacementMode.NONE
@@ -691,6 +693,7 @@ class TaskRunnerEngine(
             )
             return
         }
+        Log.i(ACTION_TAG, "hideToolbarToHandle success handleVisibleRequested=true taskId=$activeTaskId")
         val taskId = activeTaskId ?: run {
             publishOverlaySessionState(
                 _overlaySessionState.value.copy(
@@ -748,6 +751,7 @@ class TaskRunnerEngine(
             )
             return
         }
+        Log.i(ACTION_TAG, "restoreToolbarFromHandle success toolbarVisibleRequested=true taskId=$activeTaskId")
         val taskId = activeTaskId ?: run {
             publishOverlaySessionState(_overlaySessionState.value.copy(isToolbarHidden = false))
             return
@@ -1906,6 +1910,7 @@ class TaskRunnerEngine(
     ): TaskWithSteps? {
         val previousTaskId = activeTaskId
         val wasFloatingModeEnabled = _overlaySessionState.value.isFloatingModeEnabled
+        val shouldStartExpanded = !wasFloatingModeEnabled
         Log.i(
             TAG,
             "loadTaskIntoFloatingMode request taskId=$taskId previousTaskId=$previousTaskId preferredSelectionHint=$preferredSelectionHint initialTargetVisible=$initialTargetVisible panel=$activePanelType hidden=${_overlaySessionState.value.isToolbarHidden}",
@@ -1929,6 +1934,10 @@ class TaskRunnerEngine(
         )
 
         val shown = if (!_overlaySessionState.value.isFloatingModeEnabled) {
+            Log.i(
+                TAG,
+                "loadTaskIntoFloatingMode showBranch wasFloatingModeEnabled=$wasFloatingModeEnabled hidden=${_overlaySessionState.value.isToolbarHidden}",
+            )
             overlayController.showFloatingMode(
                 initialMarkers = markers,
                 targetVisible = targetVisible,
@@ -1979,6 +1988,7 @@ class TaskRunnerEngine(
                 normalizedTask = normalizedTask,
                 isTargetVisible = targetVisible,
                 statusMessageRes = statusMessageRes,
+                isToolbarHidden = if (shouldStartExpanded) false else _overlaySessionState.value.isToolbarHidden,
             ),
         )
         if (!wasFloatingModeEnabled &&

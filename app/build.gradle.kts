@@ -6,13 +6,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.clickassist"
+    namespace = "com.TradeRoutine.LZLapp"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.clickassist"
+        applicationId = "com.TradeRoutine.LZLapp"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
